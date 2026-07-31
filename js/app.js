@@ -14,12 +14,15 @@ class BMSApp {
     this.mobileLogoutBtn = document.getElementById('mobile-btn-logout');
     this.quickNewOrderBtn = document.getElementById('btn-quick-new-order');
     this.userDisplayName = document.getElementById('user-display-name');
-    this.userAvatarInitials = document.getElementById('user-avatar-initials');
     this.userRoleBadge = document.getElementById('user-role-badge');
-    
+
     // User Menu Click-Activated Dropdown
     this.userMenuBtn = document.getElementById('user-menu-btn');
     this.userDropdownMenu = document.getElementById('user-dropdown-menu');
+
+    // Self-service password change + forgot password notice
+    this.changePasswordBtn = document.getElementById('btn-change-password');
+    this.forgotPasswordBtn = document.getElementById('btn-forgot-password');
 
     // Mobile Drawer Elements
     this.mobileMenuToggle = document.getElementById('btn-mobile-menu-toggle');
@@ -32,12 +35,6 @@ class BMSApp {
   init() {
     // 1. Synchronously Initialize & Pre-hydrate DB Storage
     if (window.initDB) window.initDB();
-
-    // Quick Firestore connectivity hint (open DevTools Console to see it)
-    if (window.getFirestoreStatus) {
-      const s = window.getFirestoreStatus();
-      console.info('[BMS] Firestore:', s.connected ? 'connected ✓' : 'OFFLINE / local-only', '| pending ops:', s.pendingOps, '| write failures:', s.writeFailures);
-    }
 
     // 2. Check Auth State & Render Initial View
     this.checkAuth();
@@ -70,7 +67,6 @@ class BMSApp {
     if (!user) return;
 
     if (this.userDisplayName) this.userDisplayName.textContent = user.name;
-    if (this.userAvatarInitials) this.userAvatarInitials.textContent = user.name.slice(0, 2);
     if (this.userRoleBadge) {
       this.userRoleBadge.textContent = user.role === 'admin' ? 'مدير' : user.role === 'storekeeper' ? 'أمين مخزن' : 'موظف مبيعات';
     }
@@ -91,7 +87,7 @@ class BMSApp {
           el.classList.add('hidden');
         }
       } else if (role === 'employee') {
-        if (targetNav === 'users' || targetNav === 'reports' || targetNav === 'settings' || targetNav === 'suppliers') {
+        if (targetNav === 'users' || targetNav === 'reports' || targetNav === 'settings' || targetNav === 'suppliers' || targetNav === 'payments') {
           el.style.display = 'none';
           el.classList.add('hidden');
         } else {
@@ -150,6 +146,82 @@ class BMSApp {
         } catch (err) {
           window.showToast(err.message, 'error');
         }
+      };
+    }
+
+    // Forgot Password Notice (contact admin to reset)
+    if (this.forgotPasswordBtn) {
+      this.forgotPasswordBtn.onclick = () => {
+        window.openModal({
+          title: 'نسيت كلمة السر؟',
+          icon: 'key',
+          maxWidth: 'max-w-md',
+          contentHTML: `
+            <div class="p-2">
+              <div class="flex items-start gap-3 mb-4">
+                <div class="w-10 h-10 shrink-0 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                  <i data-lucide="info" class="w-5 h-5 text-amber-400"></i>
+                </div>
+                <p class="text-sm text-slate-300 leading-relaxed">يرجى التواصل مع المدير العام (Admin) لإعادة تعيين كلمة السر الخاصة بك من شاشة الموظفين.</p>
+              </div>
+            </div>
+          `
+        });
+      };
+    }
+
+    // Self-service Password Change (strict 3-field flow)
+    if (this.changePasswordBtn) {
+      this.changePasswordBtn.onclick = () => {
+        window.openModal({
+          title: 'تغيير كلمة السر',
+          icon: 'key',
+          maxWidth: 'max-w-md',
+          contentHTML: `
+            <form id="form-change-password" class="space-y-4">
+              <div>
+                <label for="cp-current" class="block text-xs font-bold text-slate-300 mb-1.5">كلمة السر الحالية *</label>
+                <input type="password" id="cp-current" required autocomplete="current-password" placeholder="••••••••"
+                  class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 focus:border-brand-500 rounded-xl text-white text-left font-mono">
+              </div>
+              <div>
+                <label for="cp-new" class="block text-xs font-bold text-slate-300 mb-1.5">كلمة السر الجديدة *</label>
+                <input type="password" id="cp-new" required minlength="6" autocomplete="new-password" placeholder="6 أحرف على الأقل"
+                  class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 focus:border-brand-500 rounded-xl text-white text-left font-mono">
+              </div>
+              <div>
+                <label for="cp-confirm" class="block text-xs font-bold text-slate-300 mb-1.5">تأكيد كلمة السر الجديدة *</label>
+                <input type="password" id="cp-confirm" required minlength="6" autocomplete="new-password" placeholder="••••••••"
+                  class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 focus:border-brand-500 rounded-xl text-white text-left font-mono">
+              </div>
+              <div class="flex justify-end gap-3 pt-2">
+                <button type="submit" class="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-sm rounded-xl">تغيير كلمة السر</button>
+              </div>
+            </form>
+          `,
+          onRender: (modalEl, closeModal) => {
+            const form = modalEl.querySelector('#form-change-password');
+            if (form) {
+              form.onsubmit = (e) => {
+                e.preventDefault();
+                const current = modalEl.querySelector('#cp-current').value;
+                const fresh = modalEl.querySelector('#cp-new').value;
+                const confirm = modalEl.querySelector('#cp-confirm').value;
+                if (fresh !== confirm) {
+                  window.showToast('كلمة السر الجديدة وتأكيدها غير متطابقتين', 'error');
+                  return;
+                }
+                try {
+                  window.changeOwnPassword(current, fresh);
+                  window.showToast('تم تغيير كلمة السر بنجاح', 'success');
+                  closeModal();
+                } catch (err) {
+                  window.showToast(err.message, 'error');
+                }
+              };
+            }
+          }
+        });
       };
     }
 
@@ -229,7 +301,10 @@ class BMSApp {
     if (role === 'storekeeper' && viewName !== 'products') {
       window.showToast('عفواً! أمين المخزن لديه صلاحية الوصول لصفحة المنتجات والمخزون فقط', 'error');
       viewName = 'products';
-    } else if (role === 'employee' && (viewName === 'users' || viewName === 'reports' || viewName === 'suppliers')) {
+    } else if (role === 'employee' && viewName === 'payments') {
+      window.showToast('عفواً، شاشة المدفوعات مخصصة للمدير العام فقط', 'error');
+      viewName = 'orders';
+    } else if (role === 'employee' && (viewName === 'users' || viewName === 'reports' || viewName === 'suppliers' || viewName === 'settings')) {
       window.showToast('عفواً! ليس لديك صلاحية الوصول لهذه الصفحة', 'error');
       viewName = 'dashboard';
     }
@@ -311,6 +386,9 @@ class BMSApp {
   }
 
   wireDashboardEvents() {
+    const user = window.getCurrentUser();
+    const role = user ? user.role : 'employee';
+
     const btnNewOrder = this.mainContent.querySelector('#btn-action-new-order');
     if (btnNewOrder) {
       btnNewOrder.onclick = () => {
@@ -320,9 +398,21 @@ class BMSApp {
 
     const btnPayment = this.mainContent.querySelector('#btn-action-payment');
     if (btnPayment) {
-      btnPayment.onclick = () => {
-        window.openPaymentModal({}, () => this.navigateTo('dashboard'));
-      };
+      if (role === 'admin') {
+        btnPayment.onclick = () => {
+          window.openPaymentModal({}, () => this.navigateTo('dashboard'));
+        };
+      } else {
+        // 🔒 Payments are Admin-only: hide the quick "record payment" action
+        // (and its card) from employees/storekeepers entirely.
+        const card = btnPayment.closest('#card-action-payment') || btnPayment.closest('div[class*="bg-gradient"]');
+        if (card) {
+          card.style.display = 'none';
+          card.classList.add('hidden');
+        }
+        btnPayment.style.display = 'none';
+        btnPayment.classList.add('hidden');
+      }
     }
   }
 }

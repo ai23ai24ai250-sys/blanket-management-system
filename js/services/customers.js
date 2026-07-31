@@ -3,6 +3,18 @@
  * Self-correcting recalculation formula for exact ledger debt math
  */
 
+// 👥 Customer Categories - shared across the customer module and order creation
+window.CUSTOMER_CATEGORIES = [
+  'تاجر جملة',
+  'تاجر تجزئة',
+  'عميل قطاعي / فردي',
+  'جمعية خيرية / مؤسسة',
+  'معرض / وكيل',
+  'عميل محتمل'
+];
+
+window.DEFAULT_CUSTOMER_CATEGORY = 'عميل قطاعي / فردي';
+
 window.getCustomers = function() {
   return window.getCollection(window.STORAGE_KEYS.CUSTOMERS);
 };
@@ -14,6 +26,7 @@ window.searchCustomers = function(query) {
   return customers.filter(c => 
     (c.name && c.name.toLowerCase().includes(q)) ||
     (c.phone && c.phone.includes(q)) ||
+    (c.secondaryPhone && c.secondaryPhone.includes(q)) ||
     (c.id && c.id.toLowerCase().includes(q))
   );
 };
@@ -22,7 +35,7 @@ window.findCustomerByPhone = function(phone) {
   if (!phone) return null;
   const customers = window.getCustomers();
   const cleaned = phone.trim();
-  return customers.find(c => c.phone === cleaned) || null;
+  return customers.find(c => c.phone === cleaned || (c.secondaryPhone && c.secondaryPhone === cleaned)) || null;
 };
 
 window.getCustomerById = function(id) {
@@ -40,6 +53,8 @@ window.createCustomer = function(data) {
     id: window.generateAutoId('CUST'),
     name: data.name.trim(),
     phone: data.phone.trim(),
+    secondaryPhone: (data.secondaryPhone || '').trim(),
+    category: data.category || window.DEFAULT_CUSTOMER_CATEGORY,
     address: (data.address || '').trim(),
     notes: (data.notes || '').trim(),
     ordersCount: 0,

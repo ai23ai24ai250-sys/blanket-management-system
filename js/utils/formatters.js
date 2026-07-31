@@ -101,7 +101,17 @@ window.validateEgyptianPhone = function(phone) {
 window.calculateNetProfit = function(orders) {
   const validOrders = orders.filter(o => o.status !== 'returned' && o.status !== 'cancelled');
 
+  // Grand invoice totals (items + any shipping/fees the CLIENT pays) — display only.
   const totalSales = validOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+
+  // Merchandise selling price ONLY (profit base). Shipping/extra fees paid by the
+  // client are collected on behalf of carriers/delivery services and MUST NOT be
+  // counted as store profit, so they are excluded from the profit base.
+  const itemsSales = validOrders.reduce((sum, o) => {
+    const itemsSubtotal = Number(o.itemsSubtotal)
+      || (o.items || []).reduce((s, i) => s + ((Number(i.sellingPrice) || 0) * (Number(i.quantity) || 0)), 0);
+    return sum + itemsSubtotal;
+  }, 0);
 
   const cogs = validOrders.reduce((totalCogs, order) => {
     const orderCogs = (order.items || []).reduce((itemSum, item) => {
@@ -119,9 +129,17 @@ window.calculateNetProfit = function(orders) {
   const expenses = window.getExpenses ? window.getExpenses() : [];
   const totalOpExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-  const netProfit = (totalSales - cogs) - merchantShippingTotal - merchantExtraExpensesTotal - totalOpExpenses;
+  // V3.4: Retained deposits from CANCELLED orders count as operational
+  // shipping/processing income. Only new-style cancellations persist
+  // retainedDeposit (= downPayment − refundedAmount); legacy cancelled orders
+  // (which auto-refunded the whole deposit) contribute nothing.
+  const retainedDepositIncome = orders
+    .filter(o => o.status === 'cancelled' && typeof o.retainedDeposit === 'number')
+    .reduce((sum, o) => sum + Math.max(0, Number(o.retainedDeposit) || 0), 0);
 
-  return { totalSales, cogs, merchantShippingTotal, merchantExtraExpensesTotal, totalOpExpenses, netProfit };
+  const netProfit = (itemsSales - cogs) - merchantShippingTotal - merchantExtraExpensesTotal - totalOpExpenses + retainedDepositIncome;
+
+  return { totalSales, itemsSales, cogs, merchantShippingTotal, merchantExtraExpensesTotal, totalOpExpenses, retainedDepositIncome, netProfit };
 };
 
 /**

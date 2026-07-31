@@ -188,6 +188,32 @@ function openAddUserModal(refreshParentFn) {
 }
 
 function openEditUserModal(user, refreshParentFn) {
+  const currentUser = window.getCurrentUser();
+  const isMainAdmin = user.id === 'USR-1001' ||
+    (currentUser && currentUser.email && user.email &&
+     currentUser.email.toLowerCase() === user.email.toLowerCase());
+
+  const roleFieldHTML = isMainAdmin
+    ? `
+      <div>
+        <label class="block text-xs font-bold text-slate-300 mb-1.5">الصلاحية / الرتبة *</label>
+        <select id="edit-usr-role" disabled title="لا يمكن تغيير صلاحية المدير العام الرئيسي" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold opacity-60 cursor-not-allowed">
+          <option value="employee" ${user.role === 'employee' ? 'selected' : ''}>موظف مبيعات (Sales)</option>
+          <option value="storekeeper" ${user.role === 'storekeeper' ? 'selected' : ''}>أمين مخزن (Storekeeper)</option>
+          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>مدير نظام كامل (Admin)</option>
+        </select>
+        <p class="text-[11px] text-amber-400 mt-1">🔒 لا يمكن تغيير صلاحية المدير العام الرئيسي</p>
+      </div>`
+    : `
+      <div>
+        <label class="block text-xs font-bold text-slate-300 mb-1.5">الصلاحية / الرتبة *</label>
+        <select id="edit-usr-role" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold">
+          <option value="employee" ${user.role === 'employee' ? 'selected' : ''}>موظف مبيعات (Sales)</option>
+          <option value="storekeeper" ${user.role === 'storekeeper' ? 'selected' : ''}>أمين مخزن (Storekeeper)</option>
+          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>مدير نظام كامل (Admin)</option>
+        </select>
+      </div>`;
+
   const contentHTML = `
     <form id="form-edit-user" class="space-y-4">
       <div>
@@ -206,14 +232,7 @@ function openEditUserModal(user, refreshParentFn) {
         <p class="text-[11px] text-slate-400 mt-1">إذا أردت تغيير كلمة مرور الموظف، اكتب المرور الجديدة هنا</p>
       </div>
 
-      <div>
-        <label class="block text-xs font-bold text-slate-300 mb-1.5">الصلاحية / الرتبة *</label>
-        <select id="edit-usr-role" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold">
-          <option value="employee" ${user.role === 'employee' ? 'selected' : ''}>موظف مبيعات (Sales)</option>
-          <option value="storekeeper" ${user.role === 'storekeeper' ? 'selected' : ''}>أمين مخزن (Storekeeper)</option>
-          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>مدير نظام كامل (Admin)</option>
-        </select>
-      </div>
+      ${roleFieldHTML}
 
       <div class="flex justify-end gap-3 pt-2">
         <button type="submit" class="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-sm rounded-xl">
@@ -235,8 +254,20 @@ function openEditUserModal(user, refreshParentFn) {
             name: modalEl.querySelector('#edit-usr-name').value,
             email: modalEl.querySelector('#edit-usr-email').value,
             password: modalEl.querySelector('#edit-usr-password').value,
-            role: modalEl.querySelector('#edit-usr-role').value
+            role: isMainAdmin ? user.role : modalEl.querySelector('#edit-usr-role').value
           });
+
+          // 🖥️ If the edited account is the currently logged-in user, instantly
+          // refresh the header profile (name / role) without a page reload.
+          const currentSession = window.getCurrentUser();
+          const isSelf = currentSession && (
+            (user.id && currentSession.id && user.id === currentSession.id) ||
+            (currentSession.email && user.email &&
+             currentSession.email.toLowerCase() === user.email.toLowerCase())
+          );
+          if (isSelf && window.appInstance && typeof window.appInstance.updateUserUI === 'function') {
+            window.appInstance.updateUserUI();
+          }
 
           window.showToast(`تم تعديل بيانات ورمز حساب "${user.name}" بنجاح`, 'success');
           closeModal();

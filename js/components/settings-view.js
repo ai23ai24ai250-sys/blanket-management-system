@@ -3,6 +3,16 @@
  */
 
 window.renderSettingsView = function() {
+  if (!window.isAdmin()) {
+    return `
+      <div class="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl animate-fadeIn">
+        <i data-lucide="shield-alert" class="w-16 h-16 text-rose-400 mx-auto mb-4"></i>
+        <h2 class="text-xl font-bold text-white mb-2">عفواً! صفحة الإعدادات مخصصة للمدير فقط</h2>
+        <p class="text-sm text-slate-400">ليس لديك الصلاحية الكافية لاستعراض إعدادات النظام والربط السحابي</p>
+      </div>
+    `;
+  }
+
   const fbConfig = window.getFirebaseConfig();
   const currentUser = window.getCurrentUser();
 
@@ -55,27 +65,34 @@ window.renderSettingsView = function() {
 
         <!-- Firebase Config Settings Form -->
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-4">
-          <h3 class="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <i data-lucide="cloud" class="w-5 h-5 text-brand-400"></i>
-            <span>إعدادات Firebase Cloud Firestore</span>
-          </h3>
+          <div class="flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <i data-lucide="cloud" class="w-5 h-5 text-brand-400"></i>
+              <span>إعدادات Firebase Cloud Firestore</span>
+            </h3>
+            <button type="button" id="btn-toggle-firebase-edit" class="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 text-[11px] font-bold rounded-lg border border-amber-500/30 transition-all shrink-0">
+              ✏️ تعديل الإعدادات
+            </button>
+          </div>
 
           <form id="form-firebase-config" class="space-y-3 text-xs">
             <div>
               <label class="block font-bold text-slate-300 mb-1">API Key</label>
-              <input type="text" id="fb-api-key" value="${fbConfig.apiKey || ''}" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs">
+              <input type="text" id="fb-api-key" value="${fbConfig.apiKey || ''}" readonly class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs readonly:opacity-70 readonly:cursor-not-allowed">
             </div>
             <div>
               <label class="block font-bold text-slate-300 mb-1">Auth Domain</label>
-              <input type="text" id="fb-auth-domain" value="${fbConfig.authDomain || ''}" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs">
+              <input type="text" id="fb-auth-domain" value="${fbConfig.authDomain || ''}" readonly class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs readonly:opacity-70 readonly:cursor-not-allowed">
             </div>
             <div>
               <label class="block font-bold text-slate-300 mb-1">Project ID</label>
-              <input type="text" id="fb-project-id" value="${fbConfig.projectId || ''}" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs">
+              <input type="text" id="fb-project-id" value="${fbConfig.projectId || ''}" readonly class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs readonly:opacity-70 readonly:cursor-not-allowed">
             </div>
 
+            <p class="text-[11px] text-slate-500">🔒 الإعدادات مؤمّنة ضد التعديل العشوائي — اضغط «تعديل الإعدادات» لإلغاء القفل ثم احفظ التغييرات.</p>
+
             <div class="pt-2 flex justify-end">
-              <button type="submit" class="px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl text-xs shadow-md transition-all">
+              <button type="submit" id="btn-save-firebase-config" disabled class="px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl text-xs shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                 حفظ تكوين Firebase
               </button>
             </div>
@@ -89,7 +106,30 @@ window.renderSettingsView = function() {
 };
 
 window.setupSettingsEvents = function(container) {
+  if (!window.isAdmin()) return;
+
   const form = container.querySelector('#form-firebase-config');
+  const toggleBtn = container.querySelector('#btn-toggle-firebase-edit');
+  const saveBtn = container.querySelector('#btn-save-firebase-config');
+  const inputs = ['#fb-api-key', '#fb-auth-domain', '#fb-project-id']
+    .map(sel => container.querySelector(sel))
+    .filter(Boolean);
+
+  let editing = false;
+
+  function setLocked(locked) {
+    editing = !locked;
+    inputs.forEach(i => { i.readOnly = locked; });
+    if (saveBtn) saveBtn.disabled = locked;
+    if (toggleBtn) {
+      toggleBtn.textContent = locked ? '✏️ تعديل الإعدادات' : '🔒 قفل الإعدادات';
+    }
+  }
+
+  if (toggleBtn) {
+    toggleBtn.onclick = () => setLocked(editing);
+  }
+
   if (form) {
     form.onsubmit = (e) => {
       e.preventDefault();
@@ -100,6 +140,7 @@ window.setupSettingsEvents = function(container) {
       };
       window.saveFirebaseConfig(newConfig);
       window.showToast('تم حفظ إعدادات اتصال Firebase بنجاح', 'success');
+      setLocked(true);
     };
   }
 };

@@ -67,22 +67,25 @@ function renderPaymentRows(paymentsList) {
     `;
   }
 
-  return paymentsList.map(p => `
+  return paymentsList.map(p => {
+    const isRefund = (Number(p.amount) || 0) < 0;
+    return `
     <tr>
       <td class="font-bold text-slate-400">${p.id}</td>
       <td>
-        <span class="px-2.5 py-1 text-xs font-bold rounded-lg ${p.entityType === 'customer' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'}">
-          ${p.entityType === 'customer' ? 'تحصيل من عميل' : 'تسديد لمورد'}
+        <span class="px-2.5 py-1 text-xs font-bold rounded-lg ${isRefund ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : p.entityType === 'customer' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'}">
+          ${isRefund ? 'استرداد / رد عربون (صادر)' : p.entityType === 'customer' ? 'تحصيل من عميل' : 'تسديد لمورد'}
         </span>
       </td>
       <td class="font-bold text-white">${p.entityName}</td>
-      <td class="num-font font-extrabold text-emerald-400 text-base">${window.formatCurrency(p.amount)}</td>
-      <td class="text-xs text-slate-300">${p.paymentMethod === 'cash' ? 'نقدي (كاش)' : p.paymentMethod === 'transfer' ? 'تحويل بنكي / فودافون كاش' : 'شيك'}</td>
+      <td class="num-font font-extrabold ${isRefund ? 'text-rose-400' : 'text-emerald-400'} text-base">${window.formatCurrency(p.amount)}</td>
+      <td class="text-xs text-slate-300">${p.paymentMethod === 'cash' ? 'نقدي (كاش)' : p.paymentMethod === 'transfer' ? 'تحويل بنكي / فودافون كاش' : p.paymentMethod === 'check' ? 'شيك بنكي' : 'أخرى'}</td>
       <td class="text-slate-400 text-xs">${p.notes || '—'}</td>
       <td class="text-xs text-slate-400">${p.date}</td>
       <td class="text-xs text-slate-400">${p.createdBy || 'المدير العام'}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 window.setupPaymentsEvents = function(container, refreshFn) {
@@ -103,6 +106,14 @@ window.setupPaymentsEvents = function(container, refreshFn) {
 };
 
 window.openPaymentModal = function({ defaultEntityType = 'customer', defaultEntityId = null } = {}, refreshParentFn = null) {
+  // 🔒 Admin-only: payments handle cash settlements (including outgoing money to
+  // suppliers), so only the general manager may open this screen/modal.
+  const currentUser = window.getCurrentUser();
+  if (!currentUser || currentUser.role !== 'admin') {
+    window.showToast('عفواً، شاشة المدفوعات مخصصة للمدير العام فقط', 'error');
+    return;
+  }
+
   const customers = window.getCustomers();
   const suppliers = window.getSuppliers();
 

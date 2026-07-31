@@ -76,7 +76,7 @@ function renderOrdersTableRows(ordersList) {
       <tr>
         <td class="font-bold text-brand-400 font-mono text-xs">${o.id}</td>
         <td class="font-bold text-white">${o.customerName}</td>
-        <td class="num-font text-slate-300 font-mono text-xs">${o.customerPhone}</td>
+        <td class="num-font text-slate-300 font-mono text-xs">${o.customerPhone}${o.customerSecondaryPhone ? ' / ' + o.customerSecondaryPhone : ''}</td>
         <td class="num-font font-bold text-white">${window.formatCurrency(o.totalAmount)}</td>
         <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
         <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>
@@ -156,12 +156,26 @@ window.openOrderDetailsModal = function(orderId) {
 
   const statusBadge = window.getOrderStatusBadge(order.status);
 
+  // Per-order profit breakdown (same model as calculateNetProfit):
+  // Profit is pure merchandise margin: (Items Selling Price − COGS) − Merchant-borne costs.
+  // Client-paid shipping/fees are pass-through collections for carriers → excluded from profit.
+  const orderItemsCost = (order.items || []).reduce((s, i) => s + ((Number(i.purchasePrice) || 0) * (Number(i.quantity) || 0)), 0);
+  const orderMerchantShipping = order.shippingPayer === 'merchant' ? (Number(order.shippingCost) || 0) : 0;
+  const orderMerchantExtra = order.extraExpensesPayer === 'merchant' ? (Number(order.extraExpenses) || 0) : 0;
+  const orderMerchantExpenses = orderMerchantShipping + orderMerchantExtra;
+  const orderClientShipping = order.shippingPayer === 'customer' ? (Number(order.shippingCost) || 0) : 0;
+  const orderClientExtra = order.extraExpensesPayer === 'customer' ? (Number(order.extraExpenses) || 0) : 0;
+  const orderClientPaidFees = orderClientShipping + orderClientExtra;
+  const orderItemsSales = Number(order.itemsSubtotal)
+    || (order.items || []).reduce((s, i) => s + ((Number(i.sellingPrice) || 0) * (Number(i.quantity) || 0)), 0);
+  const orderNetProfit = orderItemsSales - orderItemsCost - orderMerchantExpenses;
+
   const contentHTML = `
     <div class="space-y-4">
       <div class="p-4 bg-slate-800/80 rounded-xl border border-slate-700 flex justify-between items-center">
         <div>
           <h4 class="font-extrabold text-white text-lg">طلب رقم: ${order.id}</h4>
-          <p class="text-xs text-brand-400 font-bold">${order.customerName} - ${order.customerPhone}</p>
+          <p class="text-xs text-brand-400 font-bold">${order.customerName} - ${order.customerPhone}${order.customerSecondaryPhone ? ' - ' + order.customerSecondaryPhone : ''}</p>
         </div>
         <div class="text-left">
           <span class="text-xs text-slate-400 block mb-1">حالة الطلب</span>
@@ -185,12 +199,29 @@ window.openOrderDetailsModal = function(orderId) {
       </div>
 
       <div class="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5 text-xs">
+        ${order.directShipping ? `
+          <div class="flex justify-between items-center">
+            <span class="text-slate-300">نوع التنفيذ:</span>
+            <span class="font-bold text-purple-400 flex items-center gap-1"><i data-lucide="truck" class="w-3.5 h-3.5"></i> شحن مباشر من المورد (بدون خصم مخزون)</span>
+          </div>
+        ` : ''}
         <div class="flex justify-between text-slate-300"><span>مجموع البضاعة المباعة:</span><span class="font-bold text-white num-font">${window.formatCurrency(order.itemsSubtotal || order.totalAmount)}</span></div>
         ${order.shippingCost ? `<div class="flex justify-between text-slate-400"><span>تكلفة الشحن (${order.shippingPayer === 'customer' ? 'على العميل' : 'على التاجر'}):</span><span class="font-bold text-purple-400 num-font">${window.formatCurrency(order.shippingCost)}</span></div>` : ''}
         ${order.extraExpenses ? `<div class="flex justify-between text-slate-400"><span>مصروفات إضافية (${order.extraExpensesPayer === 'merchant' ? 'على التاجر' : 'على العميل'}):</span><span class="font-bold text-amber-400 num-font">${window.formatCurrency(order.extraExpenses)}</span></div>` : ''}
         <div class="flex justify-between text-slate-300 font-bold border-t border-slate-800 pt-1"><span>إجمالي الفاتورة:</span><span class="font-bold text-white num-font text-sm">${window.formatCurrency(order.totalAmount)}</span></div>
         <div class="flex justify-between text-slate-400"><span>المسدد مقدماً:</span><span class="font-bold text-emerald-400 num-font">${window.formatCurrency(order.downPayment)}</span></div>
         <div class="flex justify-between text-slate-200 font-bold border-t border-slate-800 pt-1"><span>المتبقي الآجل:</span><span class="font-extrabold text-rose-400 num-font text-sm">${window.formatCurrency(order.remainingBalance)}</span></div>
+        <div class="border-t border-slate-800 mt-2 pt-2 space-y-1">
+          <span class="text-xs font-bold text-slate-300 block mb-1">🧮 التحليل المالي للفاتورة:</span>
+          <div class="flex justify-between text-slate-400"><span>إجمالي الفاتورة (المحصل من العميل):</span><span class="font-bold text-white num-font">${window.formatCurrency(order.totalAmount)}</span></div>
+          <div class="flex justify-between text-slate-400"><span>مبيعات البضاعة الصافية:</span><span class="font-bold text-white num-font">${window.formatCurrency(orderItemsSales)}</span></div>
+          ${orderClientPaidFees > 0 ? `<div class="flex justify-between text-slate-500"><span>شحن ومصاريف العميل (خدمة عبور):</span><span class="font-bold text-sky-400 num-font">${window.formatCurrency(orderClientPaidFees)}</span></div>` : ''}
+          <div class="flex justify-between text-slate-400"><span>تكلفة البضاعة (COGS):</span><span class="font-bold text-amber-400 num-font">${window.formatCurrency(orderItemsCost)}</span></div>
+          <div class="flex justify-between text-slate-400"><span>مصاريف التاجر (شحن + إضافية):</span><span class="font-bold text-purple-400 num-font">${window.formatCurrency(orderMerchantExpenses)}</span></div>
+          <div class="flex justify-between font-bold border-t border-slate-800 pt-1"><span class="text-emerald-300">صافي الربح:</span><span class="font-extrabold ${orderNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'} num-font">${window.formatCurrency(orderNetProfit)}</span></div>
+          <p class="text-[10px] font-mono text-slate-500">صافي الربح (${window.formatCurrency(orderNetProfit)}) = مبيعات البضاعة الصافية (${window.formatCurrency(orderItemsSales)}) − تكلفة البضاعة (${window.formatCurrency(orderItemsCost)}) − مصاريف التاجر (${window.formatCurrency(orderMerchantExpenses)})</p>
+          <p class="text-[10px] text-slate-500">شحن/مصاريف يدفعها العميل تُحصَّل لحساب شركات الشحن ولا تُحتسب في الربح.</p>
+        </div>
         ${(order.supplierDeficits && order.supplierDeficits.length) ? `
           <div class="border-t border-rose-900/60 pt-2 mt-1 space-y-1">
             <span class="text-rose-400 font-bold">⚠️ طلب مؤجل (عجز مخزون) — مديونية للمورد:</span>
@@ -201,6 +232,17 @@ window.openOrderDetailsModal = function(orderId) {
               </div>
             `).join('')}
             <p class="text-[10px] text-slate-500">تسدد هذه المديونية من خلال صفحة المدفوعات → تسديد دفعة لمورد</p>
+          </div>
+        ` : ''}
+        ${(order.supplierShipments && order.supplierShipments.length) ? `
+          <div class="border-t border-purple-900/60 pt-2 mt-1 space-y-1">
+            <span class="text-purple-400 font-bold">🚚 شحنات توريد مباشر مسجلة على المورد:</span>
+            ${order.supplierShipments.map(d => `
+              <div class="flex justify-between items-center">
+                <span class="text-slate-300">${d.supplierName || 'المورد'} - ${d.productName} (${d.units} قطعة)</span>
+                <span class="font-bold text-purple-400 num-font">${window.formatCurrency(d.amount)}</span>
+              </div>
+            `).join('')}
           </div>
         ` : ''}
       </div>
@@ -215,6 +257,9 @@ window.openOrderDetailsModal = function(orderId) {
 };
 
 window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) {
+  const order = window.getOrderById(orderId);
+  const deposit = order ? (Number(order.downPayment) || 0) : 0;
+
   const contentHTML = `
     <form id="form-update-order-status" class="space-y-4">
       <p class="text-xs text-slate-300">تعديل حالة الفاتورة رقم <strong class="text-white font-bold">${orderId}</strong>:</p>
@@ -223,7 +268,7 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
         <label class="block text-xs font-bold text-slate-300 mb-1.5">اختر الحالة الجديدة *</label>
         <select id="select-new-order-status" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold text-xs">
           <option value="delivered" ${currentStatus === 'delivered' ? 'selected' : ''}>تم التوصيل (خصم الكميات من المخزن)</option>
-          <option value="completed" ${currentStatus === 'completed' ? 'selected' : ''}>مكتمل نهائي</option>
+          <option value="completed" ${currentStatus === 'completed' ? 'selected' : ''}>مكتمل نهائي (تسليم وتم تحصيل الحساب كامل بالكامل)</option>
           <option value="returned" ${currentStatus === 'returned' ? 'selected' : ''}>مرتجع (إعادة البضاعة للمخزن وتسوية حساب العميل)</option>
           <option value="cancelled" ${currentStatus === 'cancelled' ? 'selected' : ''}>ملغي (إلغاء الطلب بالكامل)</option>
         </select>
@@ -231,7 +276,22 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
 
       <div class="p-3 bg-amber-950/30 rounded-xl border border-amber-800/40 text-xs text-amber-300">
         ℹ️ تنبيه: اختيار "مرتجع" أو "ملغي" سيقوم آلياً بإعادة المنتجات لحساب المخزون، إلغاء مديونية الفاتورة من حساب العميل، وإلغاء مديونية عجز المخزون المسجلة على المورد.
+        <p class="mt-1.5 text-amber-200/90">💡 ملاحظة: إلغاء الطلب يُبقي العربون المدفوع محتفظاً به كإيراد تشغيلي (شحن/تجهيز) افتراضياً، مع إمكانية استرداد كامل أو جزء منه للعميل من الخيارات التالية.</p>
       </div>
+
+      ${deposit > 0 ? `
+      <div id="refund-section" class="hidden p-3 bg-rose-950/30 rounded-xl border border-rose-800/40 space-y-3">
+        <label class="flex items-center gap-2 text-xs font-bold text-rose-300 cursor-pointer">
+          <input type="checkbox" id="refund-checkbox" class="accent-rose-500 w-4 h-4">
+          <span>استرداد مبلغ من العربون للعميل</span>
+        </label>
+        <div id="refund-input-wrap" class="hidden">
+          <label class="block text-xs font-bold text-slate-300 mb-1.5">المبلغ المسترد (من إجمالي عربون: ${window.formatCurrency(deposit)})</label>
+          <input type="number" id="refund-amount" min="1" max="${deposit}" step="any" value="${deposit}" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-rose-400 font-extrabold num-font">
+          <p id="refund-validation-msg" class="text-[11px] font-bold text-rose-400 mt-1.5 hidden">⚠️ المبلغ المسترد يجب أن يكون من 1 حتى ${window.formatCurrency(deposit)}</p>
+        </div>
+      </div>
+      ` : ''}
 
       <div class="flex justify-end gap-3 pt-2">
         <button type="submit" class="px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-bold text-sm rounded-xl">
@@ -246,12 +306,61 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
     icon: 'refresh-cw',
     contentHTML,
     onRender: (modalEl, closeModal) => {
+      const statusSelect = modalEl.querySelector('#select-new-order-status');
+      const refundSection = modalEl.querySelector('#refund-section');
+      const refundCheckbox = modalEl.querySelector('#refund-checkbox');
+      const refundWrap = modalEl.querySelector('#refund-input-wrap');
+      const refundInput = modalEl.querySelector('#refund-amount');
+      const refundMsg = modalEl.querySelector('#refund-validation-msg');
+
+      const refreshRefundVisibility = () => {
+        if (refundSection) {
+          const showRefund = statusSelect.value === 'cancelled';
+          refundSection.classList.toggle('hidden', !showRefund);
+          if (!showRefund && refundCheckbox) {
+            refundCheckbox.checked = false;
+            if (refundWrap) refundWrap.classList.add('hidden');
+          }
+        }
+      };
+
+      if (statusSelect) statusSelect.onchange = refreshRefundVisibility;
+      if (refundCheckbox) {
+        refundCheckbox.onchange = () => {
+          if (refundWrap) refundWrap.classList.toggle('hidden', !refundCheckbox.checked);
+        };
+      }
+      if (refundInput) {
+        refundInput.oninput = () => {
+          if (refundMsg) {
+            const val = parseFloat(refundInput.value) || 0;
+            refundMsg.classList.toggle('hidden', !(val < 1 || val > deposit));
+          }
+        };
+      }
+
+      refreshRefundVisibility();
+
       modalEl.querySelector('#form-update-order-status').onsubmit = (e) => {
         e.preventDefault();
-        const newStatus = modalEl.querySelector('#select-new-order-status').value;
+        const newStatus = statusSelect.value;
+
+        // V3.4: Flexible deposit refund on cancellation — validate 1..downPayment.
+        let refundAmount = 0;
+        if (newStatus === 'cancelled' && refundCheckbox && refundCheckbox.checked && deposit > 0) {
+          refundAmount = parseFloat(refundInput.value) || 0;
+          if (refundAmount < 1 || refundAmount > deposit) {
+            window.showToast(`المبلغ المسترد يجب أن يكون من 1 حتى ${window.formatCurrency(deposit)}`, 'error');
+            return;
+          }
+        }
+
         try {
-          window.updateOrderStatus(orderId, newStatus);
-          window.showToast(`تم تحديث حالة الفاتورة رقم ${orderId} إلى (${newStatus}) بنجاح`, 'success');
+          window.updateOrderStatus(orderId, newStatus, refundAmount);
+          const toastMsg = refundAmount > 0
+            ? `تم إلغاء الطلب ${orderId} واسترداد ${window.formatCurrency(refundAmount)} من العربون للعميل`
+            : `تم تحديث حالة الفاتورة رقم ${orderId} إلى (${newStatus}) بنجاح`;
+          window.showToast(toastMsg, refundAmount > 0 ? 'success' : 'success');
           closeModal();
           if (refreshParentFn) refreshParentFn();
           else if (window.appInstance) window.appInstance.navigateTo('orders');

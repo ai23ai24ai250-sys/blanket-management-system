@@ -40,11 +40,13 @@ window.buildCustomerStatementEntries = function(customerId) {
   if (!customer) return [];
 
   const entries = [];
+  let seq = 0;
 
   window.getOrders().forEach(o => {
     if (o.customerId !== customerId) return;
     if (o.status === 'returned' || o.status === 'cancelled') return;
     entries.push({
+      seq: seq++,
       sortKey: o.createdAt || o.date || '',
       date: o.createdAt || o.date || '',
       type: 'فاتورة',
@@ -59,6 +61,7 @@ window.buildCustomerStatementEntries = function(customerId) {
     const amt = Number(p.amount) || 0;
     const isRefund = amt < 0;
     entries.push({
+      seq: seq++,
       sortKey: p.createdAt || p.date || '',
       date: p.createdAt || p.date || '',
       type: isRefund ? 'استرداد / رد مبلغ' : (p.isDownPayment ? 'دفعة مقدمة (عربون)' : 'تحصيل دفعة'),
@@ -69,7 +72,7 @@ window.buildCustomerStatementEntries = function(customerId) {
     });
   });
 
-  entries.sort((a, b) => (a.sortKey || '').localeCompare(b.sortKey || '') || (a.refId || '').localeCompare(b.refId || ''));
+  entries.sort((a, b) => (a.sortKey || '').localeCompare(b.sortKey || '') || (a.seq - b.seq));
 
   const netEntries = entries.reduce((s, e) => s + (e.debit - e.credit), 0);
   const opening = Math.max(0, (Number(customer.remainingBalance) || 0) - netEntries);
@@ -127,7 +130,8 @@ window.buildSupplierStatementEntries = function(supplierId) {
   let running = opening;
   txns
     .slice()
-    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '') || (a.id || '').localeCompare(b.id || ''))
+    .map((t, idx) => ({ ...t, seq: idx }))
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '') || (a.seq - b.seq))
     .forEach(t => {
       const debit = Number(t.debit) || 0;
       const credit = Number(t.credit) || 0;
@@ -149,7 +153,7 @@ window.buildSupplierStatementEntries = function(supplierId) {
 /**
  * Shared banking-style statement table renderer with running balance.
  */
-window.renderBankStatementTable = function({ entityName, entitySub = '', closingLabel, closingValue, closingColor = 'text-rose-400', rows, emptyMessage }) {
+window.renderBankStatementTable = function({ entityName, entitySub = '', closingLabel, closingValue, closingColor = 'text-rose-400', rows, emptyMessage, debitLabel = 'مدين', creditLabel = 'دائن', closingBadge = '' }) {
   const totalDebit = rows.reduce((s, r) => s + (Number(r.debit) || 0), 0);
   const totalCredit = rows.reduce((s, r) => s + (Number(r.credit) || 0), 0);
   const lastBalance = rows.length ? rows[rows.length - 1].balance : 0;
@@ -164,6 +168,7 @@ window.renderBankStatementTable = function({ entityName, entitySub = '', closing
         <div class="text-left">
           <span class="text-xs text-slate-400 block">${closingLabel}</span>
           <span class="text-xl font-extrabold ${closingColor} num-font">${window.formatCurrency(closingValue)}</span>
+          ${closingBadge ? `<div class="mt-1.5">${closingBadge}</div>` : ''}
         </div>
       </div>
 
@@ -177,8 +182,8 @@ window.renderBankStatementTable = function({ entityName, entitySub = '', closing
                 <th>التاريخ والوقت</th>
                 <th>نوع العملية / المرجع</th>
                 <th>البيان</th>
-                <th>مدين</th>
-                <th>دائن</th>
+                <th>${debitLabel}</th>
+                <th>${creditLabel}</th>
                 <th>الرصيد التراكمي</th>
               </tr>
             </thead>
@@ -228,12 +233,18 @@ window.renderCustomerStatementHTML = function(customerId) {
   if (!customer) return '<p class="text-xs text-slate-500 py-4 text-center">لا توجد بيانات عميل متاحة</p>';
   const rows = window.buildCustomerStatementEntries(customerId);
   const bal = Number(customer.remainingBalance) || 0;
+  const badge = bal > 0
+    ? `<span class="inline-block px-2.5 py-1 text-[11px] font-bold rounded-lg border bg-rose-500/20 text-rose-300 border-rose-500/30">مستحق على العميل (${window.formatCurrency(bal)})</span>`
+    : `<span class="inline-block px-2.5 py-1 text-[11px] font-bold rounded-lg border bg-emerald-500/20 text-emerald-300 border-emerald-500/30">الحساب خالص (0 ج.م)</span>`;
   return window.renderBankStatementTable({
     entityName: customer.name,
     entitySub: `${customer.phone || ''}${customer.address ? ' — ' + customer.address : ''}`,
     closingLabel: 'الرصيد المتبقي على العميل',
     closingValue: bal,
     closingColor: bal > 0 ? 'text-rose-400' : 'text-emerald-400',
+    debitLabel: 'علية (فاتورة +)',
+    creditLabel: 'سدده (تحصيل -)',
+    closingBadge: badge,
     rows,
     emptyMessage: 'لا توجد فواتير أو دفعات مسجلة لهذا العميل'
   });
@@ -244,12 +255,18 @@ window.renderSupplierStatementHTML = function(supplierId) {
   if (!supplier) return '<p class="text-xs text-slate-500 py-4 text-center">لا توجد بيانات مورد متاحة</p>';
   const rows = window.buildSupplierStatementEntries(supplierId);
   const bal = Number(supplier.remainingBalance) || 0;
+  const badge = bal > 0
+    ? `<span class="inline-block px-2.5 py-1 text-[11px] font-bold rounded-lg border bg-purple-500/20 text-purple-300 border-purple-500/30">مستحق للمورد (${window.formatCurrency(bal)})</span>`
+    : `<span class="inline-block px-2.5 py-1 text-[11px] font-bold rounded-lg border bg-emerald-500/20 text-emerald-300 border-emerald-500/30">الحساب خالص (0 ج.م)</span>`;
   return window.renderBankStatementTable({
     entityName: supplier.name,
     entitySub: `${supplier.phone || ''}${supplier.address ? ' — ' + supplier.address : ''}`,
     closingLabel: 'الرصيد المستحق للمورد',
     closingValue: bal,
     closingColor: bal > 0 ? 'text-purple-400' : 'text-emerald-400',
+    debitLabel: 'له (توريد بضاعة +)',
+    creditLabel: 'دفعناه له (تسديد -)',
+    closingBadge: badge,
     rows,
     emptyMessage: 'لا توجد حركات مسجلة لهذا المورد'
   });

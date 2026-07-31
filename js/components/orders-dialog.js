@@ -37,7 +37,7 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
               <option value="">اختر المنتج...</option>
               ${products.map(p => `
                 <option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>
-                  ${p.name} (متوفر: ${p.stock})
+                  ${p.name} (متوفر: ${p.stock ?? 0})
                 </option>
               `).join('')}
             </select>
@@ -110,6 +110,20 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           </div>
         </div>
 
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-1.5">رقم هاتف ثانوي (اختياري)</label>
+            <input type="text" id="order-cust-phone-2" maxlength="11" placeholder="01012345678" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white num-font text-left transition-all">
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-1.5">تصنيف العميل *</label>
+            <select id="order-cust-category" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold transition-all cursor-pointer">
+              ${window.CUSTOMER_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
         <!-- 3-Part Address System (مثل إضافة عميل) -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -148,6 +162,13 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
             <span>إضافة منتج آخر</span>
           </button>
         </div>
+
+        <label class="flex items-center gap-2.5 p-3 bg-purple-950/30 rounded-xl border border-purple-800/40 cursor-pointer transition-all select-none">
+          <input type="checkbox" id="order-direct-shipping" class="w-4 h-4 accent-purple-500 shrink-0">
+          <span class="text-xs font-bold text-purple-300">
+            شحن مباشر من المورد (الطلب يذهب من المصنع مباشرة للعميل — لا يُخصم من مخزون المستودع، ويُسجل توريد على المورد المختار لكل منتج)
+          </span>
+        </label>
 
         <div id="product-rows-container" class="space-y-3 max-h-64 overflow-y-auto pr-1">
           ${renderProductRows()}
@@ -203,10 +224,11 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
         <div>
           <label class="block text-xs font-bold text-slate-300 mb-1.5">حالة الطلب الإبتدائية</label>
           <select id="order-status-select" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold text-xs transition-all">
-            <option value="delivered" selected>تم التوصيل / خرج للشحن (خصم الكميات فوراً من المخزن)</option>
-            <option value="new">جديد / قيد الانتظار (بدون خصم من المخزون حالياً)</option>
-            <option value="completed">مكتمل نهائي (تسليم وتم تحصيل الحساب)</option>
+            <option value="new" selected>جديد / قيد الانتظار (بدون خصم من المخزون حالياً)</option>
+            <option value="delivered">تم التوصيل / خرج للشحن (خصم الكميات فوراً من المخزن)</option>
+            <option value="completed">مكتمل نهائي (تسليم وتم تحصيل الحساب كامل بالكامل)</option>
           </select>
+          <p id="status-auto-settle-hint" class="text-[11px] font-bold text-emerald-400 mt-1.5 hidden">✓ "مكتمل نهائي" يعني تحصيل كامل الفاتورة: سيُسدد إجمالي الفاتورة تلقائياً (المتبقي = 0 ج.م)</p>
         </div>
       </div>
 
@@ -246,7 +268,9 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
     maxWidth: 'max-w-3xl',
     onRender: (modalEl, closeModal) => {
       const phoneInput = modalEl.querySelector('#order-cust-phone');
+      const phone2Input = modalEl.querySelector('#order-cust-phone-2');
       const nameInput = modalEl.querySelector('#order-cust-name');
+      const categorySelect = modalEl.querySelector('#order-cust-category');
       const govSelect = modalEl.querySelector('#order-cust-gov');
       const citySelect = modalEl.querySelector('#order-cust-city');
       const addrDetailsInput = modalEl.querySelector('#order-cust-addr-details');
@@ -262,6 +286,7 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
       const statusSelect = modalEl.querySelector('#order-status-select');
       const submitBtn = modalEl.querySelector('#btn-submit-order');
       const dpValidationMsg = modalEl.querySelector('#dp-validation-msg');
+      const directShippingCheckbox = modalEl.querySelector('#order-direct-shipping');
 
       const totalDisp = modalEl.querySelector('#summary-total-amount');
       const dpDisp = modalEl.querySelector('#summary-down-payment');
@@ -281,6 +306,8 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           const existing = window.findCustomerByPhone(val);
           if (existing) {
             nameInput.value = existing.name;
+            if (existing.secondaryPhone) phone2Input.value = existing.secondaryPhone;
+            if (existing.category) categorySelect.value = existing.category;
             if (existing.address) {
               const parts = window.parseAddressComponents(existing.address);
               if (parts.governorate) govSelect.value = parts.governorate;
@@ -302,6 +329,7 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
       const updateCalculations = () => {
         let itemsSubtotal = 0;
         const deficitGroups = {};
+        const directShipping = directShippingCheckbox ? directShippingCheckbox.checked : false;
         modalEl.querySelectorAll('.product-item-row').forEach((row, idx) => {
           const select = row.querySelector('.product-select');
           const qtyInput = row.querySelector('.item-qty');
@@ -316,7 +344,9 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
 
           if (pObj && indicator) {
             const currentStock = Number(pObj.stock);
-            if (qty > currentStock) {
+            if (directShipping) {
+              indicator.innerHTML = `<span class="text-purple-400 font-bold">🚚 شحن مباشر: لن يُخصم من مخزون المستودع</span>`;
+            } else if (qty > currentStock) {
               const deficit = qty - currentStock;
               indicator.innerHTML = `<span class="text-rose-400 font-bold">⚠️ عجز ${deficit} قطعة (سيتصفر المخزون ويُسجل عجز للمورد)</span>`;
 
@@ -339,10 +369,13 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           }
         });
 
-        // Show live supplier deficit summary
+        // Show live supplier deficit summary OR direct-shipping notice
         const deficitEntries = Object.entries(deficitGroups);
-        if (deficitEntries.length > 0) {
-          const deficitDisp = modalEl.querySelector('#summary-supplier-deficit');
+        const deficitDisp = modalEl.querySelector('#summary-supplier-deficit');
+        if (directShipping) {
+          deficitDisp.classList.remove('hidden');
+          deficitDisp.innerHTML = `<span class="text-purple-300 font-bold">🚚 شحن مباشر من المورد: لن يُخصم أي مخزون من المستودع. ستُسجل شحنة توريد (بسعر الشراء) على المورد المختار لكل سطر.</span>`;
+        } else if (deficitEntries.length > 0) {
           deficitDisp.classList.remove('hidden');
           deficitDisp.innerHTML = `
             <span>⚠️ عجز مخزون (طلب مؤجل) سيُسجل كمديونية للمورد المختار:</span>
@@ -354,7 +387,7 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
             `).join('')}
           `;
         } else {
-          modalEl.querySelector('#summary-supplier-deficit').classList.add('hidden');
+          deficitDisp.classList.add('hidden');
         }
 
         const shipCost = Number(shippingCostInput.value) || 0;
@@ -366,19 +399,29 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           + (extraExpensesPayer === 'customer' ? exExpenses : 0);
 
         const rawDp = parseFloat(downPaymentInput.value) || 0;
-        
-        if (rawDp > totalAmount && totalAmount > 0) {
-          dpValidationMsg.textContent = `⚠️ تنبيه: الدفعة المقدمة (${window.formatCurrency(rawDp)}) لا يمكن أن تتجاوز إجمالي الفاتورة (${window.formatCurrency(totalAmount)})`;
+
+        // "مكتمل نهائي (تسليم وتم تحصيل الحساب)" => يُسدد إجمالي الفاتورة تلقائياً
+        const isCompletedStatus = statusSelect.value === 'completed';
+        const effectiveDp = isCompletedStatus ? totalAmount : rawDp;
+        if (isCompletedStatus && totalAmount > 0 && rawDp !== totalAmount) {
+          downPaymentInput.value = totalAmount;
+        }
+
+        const settleHint = modalEl.querySelector('#status-auto-settle-hint');
+        if (settleHint) settleHint.classList.toggle('hidden', !isCompletedStatus);
+
+        if (effectiveDp > totalAmount && totalAmount > 0) {
+          dpValidationMsg.textContent = `⚠️ تنبيه: الدفعة المقدمة (${window.formatCurrency(effectiveDp)}) لا يمكن أن تتجاوز إجمالي الفاتورة (${window.formatCurrency(totalAmount)})`;
           dpValidationMsg.classList.remove('hidden');
         } else {
           dpValidationMsg.classList.add('hidden');
         }
 
-        const dp = Math.min(totalAmount, rawDp);
+        const dp = Math.min(totalAmount, effectiveDp);
         const rem = Math.max(0, totalAmount - dp);
 
         totalDisp.textContent = window.formatCurrency(totalAmount);
-        dpDisp.textContent = window.formatCurrency(rawDp);
+        dpDisp.textContent = window.formatCurrency(effectiveDp);
         remDisp.textContent = window.formatCurrency(rem);
       };
 
@@ -449,7 +492,12 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
       attachRowListeners();
       updateCalculations();
 
+      if (directShippingCheckbox) {
+        directShippingCheckbox.addEventListener('change', updateCalculations);
+      }
+
       downPaymentInput.addEventListener('input', updateCalculations);
+      statusSelect.addEventListener('change', updateCalculations);
       shippingCostInput.addEventListener('input', updateCalculations);
       shippingPayerSelect.addEventListener('change', updateCalculations);
       extraExpensesInput.addEventListener('input', updateCalculations);
@@ -485,11 +533,32 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           return false;
         }
 
+        // 🔒 STRICT VALIDATION: Optional Secondary Phone (if provided)
+        const phone2Raw = phone2Input.value.trim();
+        let secondaryPhone = '';
+        if (phone2Raw) {
+          const phone2Validation = window.validateEgyptianPhone(phone2Raw);
+          if (!phone2Validation.isValid) {
+            window.showToast(phone2Validation.message, 'error');
+            return false;
+          }
+          secondaryPhone = phone2Validation.cleaned;
+        }
+
         // 🔒 STRICT VALIDATION: Valid Products & Quantity
         const validItems = lineItems.filter(item => item.productId && item.quantity > 0);
         if (validItems.length === 0) {
           window.showToast('يرجى اختيار منتج واحد على الأقل وإدخال كمية صحيحة', 'error');
           return false;
+        }
+
+        const directShipping = directShippingCheckbox ? directShippingCheckbox.checked : false;
+        if (directShipping) {
+          const missingSupplier = validItems.filter(item => !item.supplierId);
+          if (missingSupplier.length > 0) {
+            window.showToast('للشحن المباشر من المورد يجب اختيار المورد المصنع لكل منتج', 'error');
+            return false;
+          }
         }
 
         const shipCost = Number(shippingCostInput.value) || 0;
@@ -502,6 +571,8 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           + (shippingPayer === 'customer' ? shipCost : 0)
           + (extraExpensesPayer === 'customer' ? exExpenses : 0);
         const rawDownPayment = parseFloat(downPaymentInput.value) || 0;
+        // "مكتمل نهائي" يُسدد إجمالي الفاتورة بالكامل (حماية إضافية على مستوى الواجهة)
+        const finalDownPayment = (statusSelect.value === 'completed') ? totalInvoiceAmount : rawDownPayment;
 
         const gov = govSelect.value;
         const city = citySelect.value;
@@ -528,16 +599,19 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
             customerInfo: {
               name: nameInput.value,
               phone: phoneVal,
+              secondaryPhone: secondaryPhone,
+              category: categorySelect.value,
               address: addressCombined,
               notes: notesInput.value
             },
             items: validItems,
-            downPayment: rawDownPayment,
+            downPayment: finalDownPayment,
             shippingCost: shipCost,
             shippingPayer: shippingPayer,
             extraExpenses: exExpenses,
             extraExpensesPayer: extraExpensesPayer,
-            status: statusSelect.value
+            status: statusSelect.value,
+            directShipping
           });
 
           window.showToast(`تم حفظ وتأكيد الطلب رقم ${newOrder.id} بنجاح`, 'success');

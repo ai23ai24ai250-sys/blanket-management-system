@@ -58,8 +58,13 @@ window.exportFullDatabaseToExcel = function() {
       'رقم الفاتورة': o.id,
       'اسم العميل': o.customerName,
       'رقم الهاتف': o.customerPhone,
+      'الهاتف الثانوي': o.customerSecondaryPhone || '',
+      'تصنيف العميل': o.customerCategory || '',
+      'نوع التنفيذ': o.directShipping ? 'شحن مباشر من المورد' : 'من المخزون',
       'إجمالي الفاتورة (ج.م)': o.totalAmount,
       'المدفوع مقدماً (ج.م)': o.downPayment,
+      'عربون محتفظ به (إيراد)': o.status === 'cancelled' ? (Number(o.retainedDeposit) || 0) : 0,
+      'إرجاع عربون (خصم)': o.status === 'cancelled' ? (Number(o.refundedAmount) || 0) : 0,
       'المتبقي (ج.م)': o.remainingBalance,
       'حالة الطلب': o.status === 'delivered' ? 'تم التوصيل' : o.status === 'completed' ? 'مكتمل' : 'جديد',
       'المسجل': o.createdBy || 'المدير العام',
@@ -69,12 +74,37 @@ window.exportFullDatabaseToExcel = function() {
     wsOrders['!views'] = [{ RTL: true }];
     window.XLSX.utils.book_append_sheet(workbook, wsOrders, 'المبيعات والفواتير');
 
-    // 2. Sheet: Customers (العملاء وأرصدتهم)
+    // 2. Sheet: Payments & Treasury (الخزينة والدفعات) — receipts (inflow) and
+    //    refunds/refunded deposits (outflow) so net treasury reconciles exactly.
+    const payments = window.getPayments();
+    const paymentsData = payments.map(p => {
+      const amt = Number(p.amount) || 0;
+      const isRefund = amt < 0;
+      return {
+        'كود العملية': p.id,
+        'نوع العملية': isRefund
+          ? 'استرداد / رد عربون (صادر)'
+          : p.entityType === 'customer' ? 'تحصيل من عميل (وارد)' : 'تسديد لمورد (صادر)',
+        'الطرف': p.entityName,
+        'المبلغ (ج.م)': amt,
+        'وسيلة الدفع': p.paymentMethod === 'cash' ? 'نقدي (كاش)' : p.paymentMethod === 'transfer' ? 'تحويل بنكي / فودافون كاش' : p.paymentMethod === 'check' ? 'شيك بنكي' : 'أخرى',
+        'التاريخ': p.date,
+        'البيان': p.notes || '—',
+        'المسجل': p.createdBy || 'المدير العام'
+      };
+    });
+    const wsPayments = window.XLSX.utils.json_to_sheet(paymentsData);
+    wsPayments['!views'] = [{ RTL: true }];
+    window.XLSX.utils.book_append_sheet(workbook, wsPayments, 'الخزينة والدفعات');
+
+    // 3. Sheet: Customers (العملاء وأرصدتهم)
     const customers = window.getCustomers();
     const customersData = customers.map(c => ({
       'كود العميل': c.id,
       'اسم العميل': c.name,
       'رقم الهاتف': c.phone,
+      'الهاتف الثانوي': c.secondaryPhone || '',
+      'تصنيف العميل': c.category || '',
       'العنوان': c.address || '—',
       'عدد الطلبات': c.ordersCount || 0,
       'إجمالي المشتريات (ج.م)': c.totalPurchases || 0,
@@ -86,12 +116,13 @@ window.exportFullDatabaseToExcel = function() {
     wsCustomers['!views'] = [{ RTL: true }];
     window.XLSX.utils.book_append_sheet(workbook, wsCustomers, 'العملاء والأرصدة');
 
-    // 3. Sheet: Suppliers & Payments (الموردين والدفعات)
+    // 4. Sheet: Suppliers & Payments (الموردين والدفعات)
     const suppliers = window.getSuppliers();
     const suppliersData = suppliers.map(s => ({
       'كود المورد': s.id,
       'اسم المورد / المصنع': s.name,
       'رقم الهاتف': s.phone || '—',
+      'الهاتف الثانوي': s.secondaryPhone || '',
       'العنوان': s.address || '—',
       'إجمالي التعاملات (ج.م)': s.totalPurchases || 0,
       'المبلغ المسدد (ج.م)': s.paid || 0,
@@ -101,7 +132,7 @@ window.exportFullDatabaseToExcel = function() {
     wsSuppliers['!views'] = [{ RTL: true }];
     window.XLSX.utils.book_append_sheet(workbook, wsSuppliers, 'الموردين والحسابات');
 
-    // 4. Sheet: Products & Inventory (المنتجات والمخزون)
+    // 5. Sheet: Products & Inventory (المنتجات والمخزون)
     const products = window.getProducts();
     const productsData = products.map(p => ({
       'كود المنتج': p.id,
@@ -117,7 +148,7 @@ window.exportFullDatabaseToExcel = function() {
     wsProducts['!views'] = [{ RTL: true }];
     window.XLSX.utils.book_append_sheet(workbook, wsProducts, 'المنتجات والمخزون');
 
-    // 5. Sheet: Users & Accounts (حسابات الموظفين)
+    // 6. Sheet: Users & Accounts (حسابات الموظفين)
     const users = window.getUsers();
     const usersData = users.map(u => ({
       'كود المستخدم': u.id,

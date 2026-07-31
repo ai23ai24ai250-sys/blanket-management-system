@@ -70,7 +70,7 @@ function renderSupplierRows(suppliersList) {
     <tr>
       <td class="font-bold text-purple-400">${s.id}</td>
       <td class="font-bold text-white">${s.name}</td>
-      <td class="num-font text-slate-300 font-mono">${s.phone || '—'}</td>
+      <td class="num-font text-slate-300 font-mono">${s.phone || '—'}${s.secondaryPhone ? `<div class="text-[10px] text-slate-500 font-mono">${s.secondaryPhone}</div>` : ''}</td>
       <td class="text-slate-400 text-xs">${s.address || '—'}</td>
       <td class="num-font text-white font-bold">${window.formatCurrency(s.totalPurchases)}</td>
       <td class="num-font text-emerald-400 font-bold">${window.formatCurrency(s.paid)}</td>
@@ -171,6 +171,11 @@ window.openAddSupplierModal = function(supplierToEdit = null, refreshParentFn = 
         <input type="text" id="sup-phone" required maxlength="11" value="${isEdit ? (supplierToEdit.phone || '') : ''}" placeholder="01012345678" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-left num-font">
       </div>
 
+      <div>
+        <label class="block text-xs font-bold text-slate-300 mb-1.5">رقم هاتف ثانوي (اختياري)</label>
+        <input type="text" id="sup-phone-2" maxlength="11" value="${isEdit ? (supplierToEdit.secondaryPhone || '') : ''}" placeholder="01012345678" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-left num-font">
+      </div>
+
       <!-- 3-Part Address System -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
@@ -234,6 +239,13 @@ window.openAddSupplierModal = function(supplierToEdit = null, refreshParentFn = 
           return;
         }
 
+        const secondaryRaw = modalEl.querySelector('#sup-phone-2').value;
+        const secondaryValid = window.validateEgyptianPhone(secondaryRaw);
+        if (secondaryRaw.trim() && !secondaryValid.isValid) {
+          window.showToast(secondaryValid.message, 'error');
+          return;
+        }
+
         const gov = govSelect.value;
         const city = citySelect.value;
         const details = modalEl.querySelector('#sup-addr-details').value.trim();
@@ -242,6 +254,7 @@ window.openAddSupplierModal = function(supplierToEdit = null, refreshParentFn = 
         const data = {
           name: modalEl.querySelector('#sup-name').value,
           phone: phoneValid.cleaned,
+          secondaryPhone: secondaryRaw.trim() ? secondaryValid.cleaned : '',
           address: addressCombined,
           notes: modalEl.querySelector('#sup-notes').value
         };
@@ -350,7 +363,7 @@ window.openSupplierReturnModal = function(defaultSupplierId = '', refreshParentF
               <div class="col-span-12 sm:col-span-5">
                 <select class="return-product-select w-full px-2.5 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-orange-500">
                   <option value="">اختر المنتج...</option>
-                  ${products.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name} (المخزون: ${p.stock})</option>`).join('')}
+                  ${products.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name} (المخزون: ${p.stock ?? 0})</option>`).join('')}
                 </select>
               </div>
               <div class="col-span-6 sm:col-span-3">

@@ -113,6 +113,7 @@ function renderSalesReport(filteredOrders) {
   const calc = window.calculateNetProfit(filteredOrders);
 
   const grossSales = calc.totalSales;
+  const itemsSales = calc.itemsSales;
   const cogs = calc.cogs;
   const merchantShippingTotal = calc.merchantShippingTotal;
   const orderExtraExpensesTotal = calc.merchantExtraExpensesTotal;
@@ -121,14 +122,28 @@ function renderSalesReport(filteredOrders) {
 
   const totalRemainingReceivables = customers.reduce((sum, c) => sum + (Number(c.remainingBalance) || 0), 0);
 
+  // V3.4 Treasury & Cash Flow: receipts (inflow) minus refunds (outflow).
+  const payments = window.getPayments();
+  const totalInflow = payments.filter(p => (Number(p.amount) || 0) > 0).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const totalRefunds = payments.filter(p => (Number(p.amount) || 0) < 0).reduce((s, p) => s + Math.abs(Number(p.amount) || 0), 0);
+  const netTreasury = totalInflow - totalRefunds;
+  const retainedDepositIncome = calc.retainedDepositIncome || 0;
+
   return `
     <div class="space-y-6">
       
       <!-- Financial P&L Cards Strip -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
-          <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي مبيعات الفواتير</span>
+          <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي مبيعات البضاعة</span>
+          <span class="text-lg font-extrabold text-white num-font">${window.formatCurrency(itemsSales)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">قيمة البضاعة فقط (بدون شحن/مصاريف العميل)</span>
+        </div>
+
+        <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
+          <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي الفواتير (شامل شحن العميل)</span>
           <span class="text-lg font-extrabold text-white num-font">${window.formatCurrency(grossSales)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">شحن/مصاريف العميل تُحصَّل لشركات الشحن ولا تدخل في الربح</span>
         </div>
 
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
@@ -137,8 +152,9 @@ function renderSalesReport(filteredOrders) {
         </div>
 
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
-          <span class="text-xs text-slate-400 font-bold block mb-1">شحن ومصروفات الفواتير</span>
+          <span class="text-xs text-slate-400 font-bold block mb-1">شحن ومصاريف التاجر</span>
           <span class="text-lg font-bold text-purple-400 num-font">${window.formatCurrency(merchantShippingTotal + orderExtraExpensesTotal)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">التي تحملها التاجر فقط (0 إذا دفعها العميل)</span>
         </div>
 
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
@@ -154,6 +170,28 @@ function renderSalesReport(filteredOrders) {
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
           <span class="text-xs text-slate-400 font-bold block mb-1">الديون والآجل لدى العملاء</span>
           <span class="text-lg font-extrabold text-rose-400 num-font">${window.formatCurrency(totalRemainingReceivables)}</span>
+        </div>
+      </div>
+
+      <!-- Treasury & Daily Cash Flow Summary -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
+          <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي المقبوضات (وارد الخزينة)</span>
+          <span class="text-lg font-extrabold text-emerald-400 num-font">${window.formatCurrency(totalInflow)}</span>
+        </div>
+        <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
+          <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي المردودات والاستردادات (صادر)</span>
+          <span class="text-lg font-extrabold text-rose-400 num-font">${window.formatCurrency(totalRefunds)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">مرتجعات + رد عربون الطلبات الملغاة</span>
+        </div>
+        <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
+          <span class="text-xs text-slate-400 font-bold block mb-1">صافي الخزينة النقدية</span>
+          <span class="text-lg font-extrabold text-white num-font">${window.formatCurrency(netTreasury)}</span>
+        </div>
+        <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
+          <span class="text-xs text-slate-400 font-bold block mb-1">عربون محتفظ به (إيراد تشغيلي)</span>
+          <span class="text-lg font-extrabold text-amber-400 num-font">${window.formatCurrency(retainedDepositIncome)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">أرابون الأوامر الملغاة المحتفظ به</span>
         </div>
       </div>
 
@@ -200,7 +238,7 @@ function renderSalesReport(filteredOrders) {
                   <tr>
                     <td class="font-bold text-brand-400">${o.id}</td>
                     <td class="font-bold text-white">${o.customerName}</td>
-                    <td class="num-font text-slate-300 font-mono">${o.customerPhone}</td>
+                    <td class="num-font text-slate-300 font-mono">${o.customerPhone}${o.customerSecondaryPhone ? ' / ' + o.customerSecondaryPhone : ''}</td>
                     <td class="num-font font-bold text-white">${window.formatCurrency(o.totalAmount)}</td>
                     <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
                     <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>

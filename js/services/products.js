@@ -12,6 +12,18 @@ window.getProductById = function(id) {
   return products.find(p => p.id === id || p.code === id) || null;
 };
 
+window.findDuplicateProduct = function({ name, code, excludeId = '' }) {
+  const products = window.getProducts();
+  const cleanName = (name || '').trim().toLowerCase();
+  const cleanCode = (code || '').trim().toLowerCase();
+  return products.find(p =>
+    p.id !== excludeId && (
+      (cleanName && p.name && p.name.trim().toLowerCase() === cleanName) ||
+      (cleanCode && p.code && p.code.trim().toLowerCase() === cleanCode)
+    )
+  ) || null;
+};
+
 window.searchProducts = function(query) {
   const products = window.getProducts();
   if (!query) return products;
@@ -36,6 +48,10 @@ window.getLowStockProducts = function() {
 
 window.createProduct = function({ code, name, category, purchasePrice, sellingPrice, stock, minStock, supplierId = '', supplierName = '' }) {
   const numStock = Number(stock) || 0;
+
+  if (window.findDuplicateProduct({ name, code })) {
+    throw new Error('يوجد منتج مسجل بالفعل بنفس الاسم أو الكود (SKU) — اختر اسماً أو كوداً مختلفاً');
+  }
 
   const productId = window.generateAutoId('PRD');
   const now = new Date().toISOString();
@@ -86,6 +102,9 @@ window.createProduct = function({ code, name, category, purchasePrice, sellingPr
 };
 
 window.updateProduct = function(id, data) {
+  if (window.findDuplicateProduct({ name: data.name, code: data.code, excludeId: id })) {
+    throw new Error('يوجد منتج مسجل بالفعل بنفس الاسم أو الكود (SKU)');
+  }
   window.updateFirestoreDoc(window.STORAGE_KEYS.PRODUCTS, id, {
     ...data,
     updatedAt: new Date().toISOString()

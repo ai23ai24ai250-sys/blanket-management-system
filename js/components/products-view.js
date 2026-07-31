@@ -80,7 +80,7 @@ function renderProductRows(productsList) {
         <td class="font-bold text-white">${p.name}</td>
         <td class="text-xs font-bold text-purple-300">${p.supplierName || '—'}</td>
         <td class="num-font font-extrabold ${isNegative ? 'text-rose-500' : isLowStock ? 'text-amber-400' : 'text-emerald-400'} text-base">
-          ${p.stock} قطعة
+          ${p.stock ?? 0} قطعة
         </td>
         <td class="num-font text-slate-300">${window.formatCurrency(p.purchasePrice)}</td>
         <td class="num-font font-bold text-white">${window.formatCurrency(p.sellingPrice)}</td>
@@ -88,7 +88,7 @@ function renderProductRows(productsList) {
           ${isNegative ? `
             <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-500/30 text-rose-300 border border-rose-500/50 flex items-center gap-1 w-max">
               <i data-lucide="alert-octagon" class="w-3.5 h-3.5 text-rose-400"></i>
-              <span>عجز مخزون (${p.stock})</span>
+              <span>عجز مخزون (${p.stock ?? 0})</span>
             </span>
           ` : isLowStock ? `
             <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 w-max">
@@ -193,7 +193,7 @@ function openShipmentModal(product, refreshParentFn) {
         </div>
         <div class="text-left">
           <span class="text-xs text-slate-400 block">المخزون الحالي</span>
-          <span class="text-lg font-extrabold text-emerald-400 num-font">${product.stock} قطعة</span>
+          <span class="text-lg font-extrabold text-emerald-400 num-font">${product.stock ?? 0} قطعة</span>
         </div>
       </div>
 
@@ -360,11 +360,13 @@ window.openAddProductModal = function(productToEdit = null, refreshParentFn = nu
             minStock: modalEl.querySelector('#prd-min-stock')?.value || '',
             notes: modalEl.querySelector('#prd-notes')?.value || ''
           };
-          const supplierCountBefore = window.getSuppliers().length;
+          const supplierIdsBefore = window.getSuppliers().map(s => s.id);
           window.openAddSupplierModal(null, () => {
             const updatedSuppliers = window.getSuppliers();
-            // Find the most recently added supplier (last in array)
-            const newlyCreated = updatedSuppliers.length > supplierCountBefore ? updatedSuppliers[updatedSuppliers.length - 1] : null;
+            // The newly created supplier is the one whose id was NOT present before
+            // (new docs are inserted at the START of the cache, so the last array
+            // element is NOT the newest one — matching by id is order-independent).
+            const newlyCreated = updatedSuppliers.find(s => supplierIdsBefore.indexOf(s.id) === -1) || null;
             if (newlyCreated) {
               savedProductData.supplierId = newlyCreated.id;
             }
@@ -399,17 +401,21 @@ window.openAddProductModal = function(productToEdit = null, refreshParentFn = nu
           notes: modalEl.querySelector('#prd-notes').value
         };
 
-        if (isEdit) {
-          window.updateProduct(productToEdit.id, data);
-          window.showToast('تم تحديث بيانات المنتج والمورد بنجاح', 'success');
-        } else {
-          window.createProduct(data);
-          window.showToast('تم إضافة المنتج الجديد للمخزون وربطه بالمورد بنجاح', 'success');
-        }
+        try {
+          if (isEdit) {
+            window.updateProduct(productToEdit.id, data);
+            window.showToast('تم تحديث بيانات المنتج والمورد بنجاح', 'success');
+          } else {
+            window.createProduct(data);
+            window.showToast('تم إضافة المنتج الجديد للمخزون وربطه بالمورد بنجاح', 'success');
+          }
 
-        closeModal();
-        if (refreshParentFn) refreshParentFn();
-        else if (window.appInstance) window.appInstance.navigateTo('products');
+          closeModal();
+          if (refreshParentFn) refreshParentFn();
+          else if (window.appInstance) window.appInstance.navigateTo('products');
+        } catch (err) {
+          window.showToast(err.message, 'error');
+        }
       };
     }
   });

@@ -18,10 +18,16 @@ window.renderCustomersView = function() {
           <p class="text-sm text-slate-400">إدارة بيانات العملاء، إجمالي المشتريات، والمدفوعات والمستحقات المتبقية</p>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <div class="relative w-full sm:w-64">
             <input type="text" id="customers-search-input" placeholder="بحث بالاسم، رقم الهاتف، الكود..." class="w-full pl-10 pr-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition-all">
             <i data-lucide="search" class="w-4 h-4 text-slate-500 absolute left-3 top-3"></i>
+          </div>
+          <div class="relative w-full sm:w-52">
+            <select id="customers-category-filter" class="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500 transition-all cursor-pointer">
+              <option value="">كل التصنيفات</option>
+              ${window.CUSTOMER_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+            </select>
           </div>
           <button id="btn-add-customer" onclick="window.openAddCustomerModal()" class="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl shadow-md transition-all shrink-0 flex items-center gap-1.5">
             <i data-lucide="user-plus" class="w-4 h-4"></i>
@@ -38,6 +44,7 @@ window.renderCustomersView = function() {
               <tr>
                 <th>كود العميل</th>
                 <th>اسم العميل</th>
+                <th>التصنيف</th>
                 <th>رقم الهاتف</th>
                 <th>العنوان والمحافظة</th>
                 <th>عدد الفواتير</th>
@@ -58,11 +65,25 @@ window.renderCustomersView = function() {
   `;
 };
 
+const CATEGORY_BADGE_STYLES = {
+  'تاجر جملة': 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  'تاجر تجزئة': 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+  'عميل قطاعي / فردي': 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+  'جمعية خيرية / مؤسسة': 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  'معرض / وكيل': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  'عميل محتمل': 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+};
+
+function renderCategoryBadge(category) {
+  const style = CATEGORY_BADGE_STYLES[category] || 'bg-slate-500/20 text-slate-300 border-slate-500/30';
+  return `<span class="inline-block px-2 py-0.5 text-[10px] font-bold rounded-lg border whitespace-nowrap ${style}">${category || '—'}</span>`;
+}
+
 function renderCustomerRows(customersList) {
   if (!customersList || customersList.length === 0) {
     return `
       <tr>
-        <td colspan="9" class="text-center py-8 text-slate-500">لا يوجد عملاء مسجلين المطابقين للبحث</td>
+        <td colspan="10" class="text-center py-8 text-slate-500">لا يوجد عملاء مسجلين المطابقين للبحث</td>
       </tr>
     `;
   }
@@ -71,7 +92,8 @@ function renderCustomerRows(customersList) {
     <tr>
       <td class="font-bold text-sky-400">${c.id}</td>
       <td class="font-bold text-white">${c.name}</td>
-      <td class="num-font text-slate-300 font-mono">${c.phone}</td>
+      <td>${renderCategoryBadge(c.category)}</td>
+      <td class="num-font text-slate-300 font-mono">${c.phone}${c.secondaryPhone ? `<div class="text-[10px] text-slate-500 font-mono">${c.secondaryPhone}</div>` : ''}</td>
       <td class="text-slate-400 text-xs">${c.address || '—'}</td>
       <td class="num-font text-center font-bold text-slate-300">${c.ordersCount || 0}</td>
       <td class="num-font text-white font-bold">${window.formatCurrency(c.totalPurchases)}</td>
@@ -101,16 +123,34 @@ function renderCustomerRows(customersList) {
 
 window.setupCustomersEvents = function(container, refreshFn) {
   const searchInput = container.querySelector('#customers-search-input');
+  const categoryFilter = container.querySelector('#customers-category-filter');
   const tableBody = container.querySelector('#customers-table-body');
   const addBtn = container.querySelector('#btn-add-customer');
 
+  const applyFilters = () => {
+    const q = (searchInput ? searchInput.value : '').trim().toLowerCase();
+    const cat = categoryFilter ? categoryFilter.value : '';
+    let filtered = window.getCustomers();
+    if (cat) filtered = filtered.filter(c => (c.category || '') === cat);
+    if (q) {
+      filtered = filtered.filter(c =>
+        (c.name && c.name.toLowerCase().includes(q)) ||
+        (c.phone && c.phone.includes(q)) ||
+        (c.secondaryPhone && c.secondaryPhone.includes(q)) ||
+        (c.id && c.id.toLowerCase().includes(q))
+      );
+    }
+    tableBody.innerHTML = renderCustomerRows(filtered);
+    if (window.lucide) window.lucide.createIcons({ props: {}, nameAttr: 'data-lucide' });
+    attachActionEvents();
+  };
+
   if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      const filtered = window.searchCustomers(e.target.value);
-      tableBody.innerHTML = renderCustomerRows(filtered);
-      if (window.lucide) window.lucide.createIcons({ props: {}, nameAttr: 'data-lucide' });
-      attachActionEvents();
-    });
+    searchInput.addEventListener('input', applyFilters);
+  }
+
+  if (categoryFilter) {
+    categoryFilter.addEventListener('change', applyFilters);
   }
 
   if (addBtn) {
@@ -160,6 +200,20 @@ window.openAddCustomerModal = function(customerToEdit = null, refreshParentFn = 
       <div>
         <label class="block text-xs font-bold text-slate-300 mb-1.5">رقم الهاتف (11 رقماً يبدأ بـ 01) *</label>
         <input type="text" id="cust-phone" required maxlength="11" value="${isEdit ? customerToEdit.phone : ''}" placeholder="01012345678" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-left num-font">
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-300 mb-1.5">رقم هاتف ثانوي (اختياري)</label>
+        <input type="text" id="cust-phone-2" maxlength="11" value="${isEdit ? (customerToEdit.secondaryPhone || '') : ''}" placeholder="01012345678" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono text-left num-font">
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold text-slate-300 mb-1.5">تصنيف العميل (Category) *</label>
+        <select id="cust-category" required class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold cursor-pointer">
+          ${window.CUSTOMER_CATEGORIES.map(cat => `
+            <option value="${cat}" ${(isEdit ? customerToEdit.category : window.DEFAULT_CUSTOMER_CATEGORY) === cat ? 'selected' : ''}>${cat}</option>
+          `).join('')}
+        </select>
       </div>
 
       <!-- 3-Part Address System -->
@@ -225,6 +279,13 @@ window.openAddCustomerModal = function(customerToEdit = null, refreshParentFn = 
           return;
         }
 
+        const secondaryRaw = modalEl.querySelector('#cust-phone-2').value;
+        const secondaryValid = window.validateEgyptianPhone(secondaryRaw);
+        if (secondaryRaw.trim() && !secondaryValid.isValid) {
+          window.showToast(secondaryValid.message, 'error');
+          return;
+        }
+
         const gov = govSelect.value;
         const city = citySelect.value;
         const details = modalEl.querySelector('#cust-addr-details').value.trim();
@@ -233,6 +294,8 @@ window.openAddCustomerModal = function(customerToEdit = null, refreshParentFn = 
         const data = {
           name: modalEl.querySelector('#cust-name').value,
           phone: phoneValid.cleaned,
+          secondaryPhone: secondaryRaw.trim() ? secondaryValid.cleaned : '',
+          category: modalEl.querySelector('#cust-category').value,
           address: addressCombined,
           notes: modalEl.querySelector('#cust-notes').value
         };

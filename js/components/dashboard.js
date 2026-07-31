@@ -7,7 +7,7 @@ window.renderDashboard = function() {
   const orders = window.getOrders();
   const calc = window.calculateNetProfit(orders);
 
-  const totalSales = calc.totalSales;
+  const totalSales = calc.itemsSales;
   const netProfit = calc.netProfit;
 
   // Total Inventory Valuation
@@ -54,7 +54,7 @@ window.renderDashboard = function() {
             </div>
           </div>
           <div class="text-lg font-extrabold text-white num-font mb-1">${window.formatCurrency(totalSales)}</div>
-          <span class="text-[10px] text-emerald-400 font-medium">محدث فورياً</span>
+          <span class="text-[10px] text-emerald-400 font-medium">مبيعات البضاعة الصافية (بدون شحن أو مصاريف العميل)</span>
         </div>
 
         <!-- Total Inventory Valuation Card -->
@@ -78,7 +78,7 @@ window.renderDashboard = function() {
             </div>
           </div>
           <div class="text-lg font-extrabold ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'} num-font mb-1">${window.formatCurrency(netProfit)}</div>
-          <span class="text-[10px] text-slate-400">بعد التكلفة والمصروفات</span>
+          <span class="text-[10px] text-slate-400">ربح البضاعة فقط بعد التكلفة ومصاريف التاجر (بدون شحن العميل)</span>
         </div>
 
         <!-- Customer Receivables Card -->
@@ -152,7 +152,7 @@ window.renderDashboard = function() {
           </button>
         </div>
 
-        <div class="bg-gradient-to-br from-emerald-950/40 to-slate-900 border border-emerald-500/30 p-6 rounded-2xl shadow-lg flex flex-col justify-between">
+        <div id="card-action-payment" class="bg-gradient-to-br from-emerald-950/40 to-slate-900 border border-emerald-500/30 p-6 rounded-2xl shadow-lg flex flex-col justify-between">
           <div>
             <div class="flex items-center gap-3 mb-3">
               <div class="p-3 bg-emerald-600/20 text-emerald-400 rounded-xl border border-emerald-500/30">
@@ -208,7 +208,7 @@ window.renderDashboard = function() {
                 <tr>
                   <td class="font-bold text-brand-400">${o.id}</td>
                   <td class="font-bold text-white">${o.customerName}</td>
-                  <td class="num-font text-slate-300">${o.customerPhone}</td>
+                  <td class="num-font text-slate-300">${o.customerPhone}${o.customerSecondaryPhone ? ' / ' + o.customerSecondaryPhone : ''}</td>
                   <td class="num-font font-bold text-white">${window.formatCurrency(o.totalAmount)}</td>
                   <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
                   <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>
