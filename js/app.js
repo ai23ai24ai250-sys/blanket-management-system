@@ -45,10 +45,15 @@ class BMSApp {
 
   checkAuth() {
     if (!window.isAuthenticated()) {
+      // 🔒 No session = public login screen: tear down any realtime Firestore
+      // listeners so unauthenticated reads never fire permission errors here.
+      if (window.stopFirestoreSync) window.stopFirestoreSync();
       if (this.loginScreen) this.loginScreen.classList.remove('hidden');
       if (this.mainContent) this.mainContent.innerHTML = '';
       this.closeMobileDrawer();
     } else {
+      // ✅ Active session confirmed: only NOW start realtime Firestore sync.
+      if (window.startFirestoreSync) window.startFirestoreSync();
       if (this.loginScreen) this.loginScreen.classList.add('hidden');
       const user = window.getCurrentUser();
       
@@ -122,8 +127,10 @@ class BMSApp {
     });
 
     // Firestore write/listener failure feedback (throttled so a flapping
-    // connection or blocked Firestore rules don't spam toasts)
+    // connection or blocked Firestore rules don't spam toasts). Never surfaced
+    // on the public login screen — there sync is expected to be quiet anyway.
     window.addEventListener('bms-sync-error', (e) => {
+      if (!window.isAuthenticated()) return;
       const now = Date.now();
       if (now - (window._lastSyncErrorToastAt || 0) > 30000) {
         window._lastSyncErrorToastAt = now;

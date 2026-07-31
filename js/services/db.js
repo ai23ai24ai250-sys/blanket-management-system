@@ -86,6 +86,17 @@ window._firestoreWriteFailures = 0;
 
 function _recordWriteError(context, err) {
   const message = err && err.message ? err.message : String(err);
+
+  // 🔒 Public / login-screen guard: without an active session Firestore rules
+  // correctly reject reads & writes ("Missing or insufficient permissions").
+  // Those failures are EXPECTED on the login screen and must never surface as a
+  // red sync-error toast or console noise. The grace window also swallows the
+  // brief permission-denied flash right after login, before the background
+  // Firebase Auth sign-in has settled.
+  const isPublicView = !(window.isAuthenticated && window.isAuthenticated());
+  const inGraceWindow = Date.now() < (window._authGraceUntil || 0);
+  if (isPublicView || inGraceWindow) return;
+
   window._firestoreWriteFailures = (window._firestoreWriteFailures || 0) + 1;
   window.firestoreSyncErrors.push({ at: new Date().toISOString(), context, message });
   if (window.firestoreSyncErrors.length > 100) window.firestoreSyncErrors.shift();
@@ -177,8 +188,104 @@ function _addTombstone(docId) {
   if (t.indexOf(docId) === -1) { t.push(docId); _setTombstones(t); }
 }
 
-// Initialize DB: Synchronously pre-hydrate cache from LocalStorage FIRST, then
-// attach Firestore realtime listeners, then run a safety-net pull from the cloud.
+// =====================================================================
+// AUTH-GATED REALTIME SYNC
+// ---------------------------------------------------------------------
+// Realtime listeners + cloud pulls must NEVER run while the app is on the
+// public login screen (no active session): an unauthenticated Firestore read
+// is rejected by the security rules and would fire a "Missing or insufficient
+// permissions" sync-error toast before the user even logs in. Sync therefore
+// only starts AFTER the app confirms an active logged-in session
+// (window.startFirestoreSync) and is torn down again on logout.
+// =====================================================================
+window._syncUnsubscribers = [];
+window._authGraceUntil = 0;
+
+function _attachFirestoreListeners() {
+  if (!window.db) return;
+  if (window._syncUnsubscribers && window._syncUnsubscribers.length > 0) return;
+
+  const collections = syncCollections();
+  const subs = [];
+
+  collections.forEach((key) => {
+    const unsub = window.db.collection(key).onSnapshot((snapshot) => {
+      // Apply server truth, preserving local-only docs (offline writes not yet
+      // visible on the server). Delivery of queued ops happens on reconnect /
+      // reload / view render / online+visibility triggers, not per snapshot.
+      const serverItems = [];
+      snapshot.forEach(doc => {
+        serverItems.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Never resurrect locally-deleted docs
+      const tombSet = {};
+      window.getTombstones().forEach(id => { tombSet[id] = true; });
+
+      // Keep local-only docs (offline writes not yet visible on the server)
+      const serverIds = {};
+      serverItems.forEach(d => { serverIds[d.id] = true; });
+      const localItems = window.firestoreCache[key] || [];
+      const merged = serverItems.filter(d => !tombSet[d.id]);
+      localItems.forEach(d => {
+        if (d.id && !serverIds[d.id] && !tombSet[d.id]) merged.push(d);
+      });
+
+      // Prune tombstones whose delete already landed on the server
+      _setTombstones(window.getTombstones().filter(id => serverIds[id]));
+
+      window.firestoreCache[key] = merged;
+      localStorage.setItem(`bms_data_${key}`, JSON.stringify(merged));
+      window.firestoreLastSyncAt = new Date().toISOString();
+      window.firestoreLastSyncSource = 'snapshot';
+      window.dispatchEvent(new CustomEvent('bms-data-synced', { detail: { key, items: merged } }));
+    }, (error) => {
+      // e.g. Firestore rules deny reads -> surface it and keep local data usable
+      _recordWriteError('snapshot ' + key, error);
+    });
+    subs.push(unsub);
+  });
+
+  window._syncUnsubscribers = subs;
+}
+
+function _detachFirestoreListeners() {
+  if (window._syncUnsubscribers) {
+    window._syncUnsubscribers.forEach(unsub => {
+      try { unsub(); } catch (e) { /* ignore */ }
+    });
+    window._syncUnsubscribers = [];
+  }
+}
+
+// Start realtime sync + a safety-net cloud pull. No-op on the login screen.
+window.startFirestoreSync = function() {
+  if (!window.isAuthenticated()) return;
+
+  // Brief grace window: right after login the local session already exists but
+  // the background Firebase Auth sign-in may not have settled yet; a transient
+  // permission-denied snapshot during that window must not toast.
+  window._authGraceUntil = Date.now() + 5000;
+
+  _attachFirestoreListeners();
+
+  // 🛟 Safety-net pull: an explicit GET guarantees cloud data reaches this
+  //     device even if a listener was missed or failed to attach.
+  window.flushPendingOps().finally(() => {
+    window.fetchAllFromFirestore(true);
+  });
+};
+
+// Tear down realtime listeners when the session ends (logout / login screen).
+window.stopFirestoreSync = function() {
+  window._authGraceUntil = 0;
+  _detachFirestoreListeners();
+};
+
+// Initialize DB: Synchronously pre-hydrate cache from LocalStorage FIRST.
+// Realtime listeners/cloud pulls are NOT attached here anymore — they are gated
+// behind an active session (see startFirestoreSync above), so the public login
+// screen never triggers unauthenticated Firestore reads.
 window.initDB = function() {
   const collections = syncCollections();
 
@@ -196,51 +303,12 @@ window.initDB = function() {
     }
   });
 
-  // 🔒 2. Attach Real-time Listeners (onSnapshot) for Cloud Firestore Sync
-  if (window.db) {
-    collections.forEach((key) => {
-      window.db.collection(key).onSnapshot((snapshot) => {
-        // Apply server truth, preserving local-only docs (offline writes not yet
-        // visible on the server). Delivery of queued ops happens on reconnect /
-        // reload / view render / online+visibility triggers, not per snapshot.
-        const serverItems = [];
-        snapshot.forEach(doc => {
-          serverItems.push({ id: doc.id, ...doc.data() });
-        });
-
-        // Never resurrect locally-deleted docs
-        const tombSet = {};
-        window.getTombstones().forEach(id => { tombSet[id] = true; });
-
-        // Keep local-only docs (offline writes not yet visible on the server)
-        const serverIds = {};
-        serverItems.forEach(d => { serverIds[d.id] = true; });
-        const localItems = window.firestoreCache[key] || [];
-        const merged = serverItems.filter(d => !tombSet[d.id]);
-        localItems.forEach(d => {
-          if (d.id && !serverIds[d.id] && !tombSet[d.id]) merged.push(d);
-        });
-
-        // Prune tombstones whose delete already landed on the server
-        _setTombstones(window.getTombstones().filter(id => serverIds[id]));
-
-        window.firestoreCache[key] = merged;
-        localStorage.setItem(`bms_data_${key}`, JSON.stringify(merged));
-        window.firestoreLastSyncAt = new Date().toISOString();
-        window.firestoreLastSyncSource = 'snapshot';
-        window.dispatchEvent(new CustomEvent('bms-data-synced', { detail: { key, items: merged } }));
-      }, (error) => {
-        // e.g. Firestore rules deny reads -> surface it and keep local data usable
-        _recordWriteError('snapshot ' + key, error);
-      });
-    });
+  // 🔒 2. Realtime sync only starts once an active session is confirmed (the app
+  //     calls startFirestoreSync on login / session restore). If a session is
+  //     already present at init time, start it here too.
+  if (window.isAuthenticated()) {
+    window.startFirestoreSync();
   }
-
-  // 🛟 3. Safety-net pull: an explicit GET guarantees cloud data reaches this
-  //     device even if a listener was missed or failed to attach.
-  window.flushPendingOps().finally(() => {
-    window.fetchAllFromFirestore(true);
-  });
 };
 
 // Re-fetch every collection directly from Firestore (not localStorage) and refresh
@@ -278,10 +346,11 @@ window.fetchAllFromFirestore = function(force) {
 // Auto-recover on reconnect & when the app returns to foreground
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('online', () => {
+    if (!(window.isAuthenticated && window.isAuthenticated())) return;
     window.flushPendingOps().finally(() => window.fetchAllFromFirestore());
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
+    if (document.visibilityState === 'visible' && window.isAuthenticated && window.isAuthenticated()) {
       window.flushPendingOps().finally(() => window.fetchAllFromFirestore());
     }
   });
