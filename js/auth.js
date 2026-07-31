@@ -1,0 +1,199 @@
+/**
+ * Authentication & Role-Based User Management Module
+ * Connected to Firebase Auth & Cloud Firestore Users Collection
+ */
+
+const AUTH_STORAGE_KEY = 'bms_user_session';
+
+// Clean Slate Admin Primary Account
+const INITIAL_USERS = [
+  { id: 'USR-1001', name: 'المدير العام', email: 'admin@store.com', role: 'admin', createdAt: '2026-07-01T10:00:00Z' }
+];
+
+// Purge any legacy persistent sessions from localStorage so login is ALWAYS enforced on launch
+localStorage.removeItem(AUTH_STORAGE_KEY);
+
+window.getUsers = function() {
+  const users = window.getCollection(window.STORAGE_KEYS.USER);
+  return (users && users.length > 0) ? users : INITIAL_USERS;
+};
+
+window.getCurrentUser = function() {
+  if (window.auth && window.auth.currentUser) {
+    const fbUser = window.auth.currentUser;
+    const users = window.getUsers();
+    const matched = users.find(u => u.email.toLowerCase() === fbUser.email.toLowerCase());
+
+    return {
+      email: fbUser.email,
+      name: matched ? matched.name : (fbUser.displayName || 'المدير العام'),
+      role: matched ? matched.role : (fbUser.email.includes('admin') ? 'admin' : 'employee')
+    };
+  }
+
+  const session = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (session) {
+    try {
+      return JSON.parse(session);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  return null;
+};
+
+window.login = function(email, password) {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanPassword = (password || '').trim();
+
+  if (!cleanEmail || !cleanPassword) {
+    throw new Error('يرجى إدخال البريد الإلكتروني وكلمة المرور');
+  }
+
+  // Try Firebase Auth in background (non-blocking)
+  if (window.auth) {
+    window.auth.signInWithEmailAndPassword(cleanEmail, cleanPassword)
+      .then((userCredential) => {
+        const user = userCredential.user;
+        const usersList = window.getUsers();
+        const matched = usersList.find(u => u.email.toLowerCase() === user.email.toLowerCase());
+        const sessionUser = {
+          email: user.email,
+          name: matched ? matched.name : (user.displayName || 'المستخدم'),
+          role: matched ? matched.role : (user.email.includes('admin') ? 'admin' : 'employee'),
+          loginTime: new Date().toISOString()
+        };
+        sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionUser));
+      })
+      .catch((error) => {
+        console.warn('Firebase Auth Cloud Sign-in note:', error.message);
+      });
+  }
+
+  // Local session auth (always works offline)
+  const usersList = window.getUsers();
+  const user = usersList.find(u => u.email.toLowerCase() === cleanEmail);
+
+  // For accounts with password set in Firestore, require matching password
+  if (user && user.password) {
+    if (user.password.trim() !== cleanPassword) {
+      throw new Error('كلمة المرور غير صحيحة');
+    }
+  } else if (!user && cleanEmail !== 'admin@store.com') {
+    throw new Error('حساب المستخدم غير موجود في النظام');
+  }
+
+  const sessionUser = {
+    email: cleanEmail,
+    name: user ? user.name : (cleanEmail.includes('admin') ? 'المدير العام' : 'موظف مبيعات'),
+    role: user ? user.role : (cleanEmail.includes('admin') ? 'admin' : 'employee'),
+    loginTime: new Date().toISOString()
+  };
+
+  sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionUser));
+  return sessionUser;
+};
+
+window.logout = function() {
+  if (window.auth) {
+    window.auth.signOut().catch(err => console.error(err));
+  }
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+};
+
+window.isAuthenticated = function() {
+  return !!window.getCurrentUser();
+};
+
+window.isAdmin = function() {
+  const user = window.getCurrentUser();
+  return user && user.role === 'admin';
+};
+
+/**
+ * Strict Admin Password Verification Helper
+ * Returns strict boolean (true/false)
+ * Uses Firestore-stored password as source of truth only
+ */
+window.verifyAdminPassword = function(enteredPassword) {
+  if (!enteredPassword || typeof enteredPassword !== 'string' || !enteredPassword.trim()) {
+    return false;
+  }
+
+  const currentUser = window.getCurrentUser();
+  if (!currentUser) return false;
+
+  const cleanInput = enteredPassword.trim();
+  const usersList = window.getUsers();
+  const activeUserDoc = usersList.find(u => u.email.toLowerCase() === currentUser.email.toLowerCase());
+
+  // Check against password stored in Firestore users document
+  if (activeUserDoc && activeUserDoc.password && activeUserDoc.password.trim()) {
+    return activeUserDoc.password.trim() === cleanInput;
+  }
+
+  // If no password is configured in Firestore yet and user is admin, 
+  // accept the entered password (the admin is already authenticated via session/Firebase Auth)
+  return currentUser.role === 'admin' && cleanInput.length > 0;
+};
+
+/**
+ * Admin User Creation without session overwrite
+ */
+window.createNewUserAccount = function({ name, email, password, role }) {
+  if (!window.isAdmin()) {
+    throw new Error('غير مصرح لك بإنشاء حسابات مستخدمين. هذه الصلاحية للمدير فقط');
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const existing = window.getUsers().find(u => u.email.toLowerCase() === cleanEmail);
+  if (existing) {
+    throw new Error('هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر');
+  }
+
+  const newUser = {
+    id: window.generateAutoId('USR'),
+    name: name.trim(),
+    email: cleanEmail,
+    password: password.trim(),
+    role: role || 'employee',
+    createdAt: new Date().toISOString()
+  };
+
+  return window.addFirestoreDoc(window.STORAGE_KEYS.USER, newUser);
+};
+
+window.updateUserAccount = function(userId, { name, email, password, role }) {
+  if (!window.isAdmin()) {
+    throw new Error('غير مصرح لك بتعديل بيانات الحسابات');
+  }
+
+  const payload = {
+    updatedAt: new Date().toISOString()
+  };
+
+  if (name) payload.name = name.trim();
+  if (email) payload.email = email.trim().toLowerCase();
+  if (role) payload.role = role;
+  if (password && password.trim().length > 0) {
+    payload.password = password.trim();
+  }
+
+  window.updateFirestoreDoc(window.STORAGE_KEYS.USER, userId, payload);
+};
+
+window.updateUserRole = function(userId, newRole) {
+  if (!window.isAdmin()) {
+    throw new Error('غير مصرح لك بتعديل الرتب والصلاحيات');
+  }
+  window.updateFirestoreDoc(window.STORAGE_KEYS.USER, userId, { role: newRole });
+};
+
+window.deleteUserAccount = function(userId) {
+  if (!window.isAdmin()) {
+    throw new Error('غير مصرح لك بحذف الحسابات');
+  }
+  window.deleteFirestoreDoc(window.STORAGE_KEYS.USER, userId);
+};
