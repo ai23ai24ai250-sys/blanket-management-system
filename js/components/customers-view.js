@@ -93,8 +93,8 @@ function renderCustomerRows(customersList) {
       <td class="font-bold text-sky-400">${c.id}</td>
       <td class="font-bold text-white">${c.name}</td>
       <td>${renderCategoryBadge(c.category)}</td>
-      <td class="num-font text-slate-300 font-mono">${c.phone}${c.secondaryPhone ? `<div class="text-[10px] text-slate-500 font-mono">${c.secondaryPhone}</div>` : ''}</td>
-      <td class="text-slate-400 text-xs">${c.address || '—'}</td>
+      <td class="num-font text-slate-300 font-mono">${window.formatPhonePair(c.phone, c.secondaryPhone)}</td>
+      <td class="text-slate-400 text-xs whitespace-normal break-words">${window.formatAddress(c.address)}</td>
       <td class="num-font text-center font-bold text-slate-300">${c.ordersCount || 0}</td>
       <td class="num-font text-white font-bold">${window.formatCurrency(c.totalPurchases)}</td>
       <td class="num-font text-emerald-400 font-bold">${window.formatCurrency(c.paid)}</td>

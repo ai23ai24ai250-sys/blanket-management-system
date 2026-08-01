@@ -43,8 +43,10 @@
     enabled: false,
     debounceMs: 3000,
     clientId: '',
+    clientSecret: '', // optional — required only for OAuth web-app clients
     accessToken: '',
     tokenExpiresAt: 0,
+    refreshToken: '', // V3.14: long-lived token for silent background renewal
     apiKey: '',
     lastSyncAt: null,
     lastSyncDirection: '',
@@ -332,15 +334,19 @@
   }
 
   // Pick the best cell representation for a column when exporting.
+  // V3.15 — NaN-immunity: a numeric column NEVER exports "NaN"/null as text; it
+  // degrades to 0 (or 0 for strings that failed to parse). Prevents aggregate
+  // garbage from corrupting sheet totals when an order/customer has bad data.
   function formatExportCell(key, value) {
     if (value === undefined || value === null || value === '') return '';
     if (DATE_KEY_RE.test(key)) return formatDateStr(value);
     if (NUMERIC_KEYS.has(key)) {
       const n = Number(String(value).replace(/,/g, '').trim());
-      return isNaN(n) ? value : n;
+      return isNaN(n) ? 0 : n;
     }
     if (TEXT_KEYS.has(key)) {
       const s = String(value).trim();
+      if (s === 'NaN' || s === 'null' || s === 'undefined') return '';
       return /^[0-9]+$/.test(s) ? "'" + s : s;
     }
     return value;
@@ -368,6 +374,12 @@
 
   NS.exportAll = async function (transport) {
     if (!transport) throw new Error('SyncTransport غير محقون — استخدم NS.setTransport أو مرر transport');
+    // V3.14: reconcile every customer balance from the real ledger (orders +
+    // payments) BEFORE exporting, so the aggregate columns written to the sheet
+    // always reflect the system's truth — never a stale/wrong cached number.
+    if (window.recalculateAllCustomerBalances) {
+      window.recalculateAllCustomerBalances();
+    }
     const report = { sheets: [], rowsTotal: 0 };
     for (const sheet of SHEETS) {
       const entities = collection(sheet.entityKey);
@@ -504,7 +516,17 @@
         syncUpdatedAt: timeCell(row) || new Date().toISOString()
       };
       window.addFirestoreDoc(window.STORAGE_KEYS.CUSTOMERS, doc);
-      return { created: true, entityId: id, entityName: name, audits: ['SYNC_CREATE عميل ' + id] };
+      // V3.14: when a NEW customer row carries computed aggregate columns (e.g.
+      // remainingBalance/totalPurchases/paid/ordersCount) they are NEVER
+      // imported — the ledger re-derives them. Record the rejection so the
+      // audit trail shows exactly why a hand-typed aggregate was ignored.
+      const notes = [];
+      for (const f of sheetOf('customers').protected) {
+        if (row[f] !== undefined && row[f] !== null && row[f] !== '') {
+          notes.push('حقل محاسب محسوب ' + f + ' (' + strCell(row[f]) + ') لم يُستورد — يُحسب من الفواتير والدفعات فقط');
+        }
+      }
+      return { created: true, entityId: id, entityName: name, audits: ['SYNC_CREATE عميل ' + id], notes };
     }
     const payload = {};
     const notes = [];
@@ -660,14 +682,24 @@
       if (!custRes) throw new Error('صف الطلب ' + id + ' غير قادر على إنشاء/إيجاد العميل');
       const items = parseJSONField(row.items);
       const computedSubtotal = items.reduce((s, it) => s + (Number(it.subtotal) || (Number(it.quantity || 0) * Number(it.sellingPrice || 0)) || 0), 0);
+      // V3.14: when the items JSON is present and computable the sheet's own
+      // aggregate columns (itemsSubtotal / totalAmount / remainingBalance) are
+      // NEVER trusted — the system's formulas re-derive them from the items, so
+      // a hand-typed aggregate (e.g. 78000 in the إجمالي الفاتورة column) can
+      // never inflate an order or, through it, the customer's balance.
+      const hasUsableItems = Array.isArray(items) && items.length > 0 && computedSubtotal > 0;
       const shipCost = row.shippingCost === undefined || row.shippingCost === null || row.shippingCost === '' ? 0 : num(row.shippingCost, 'الشحن', false);
       const shipPayer = String(row.shippingPayer || '').trim() || 'customer';
       const exCost = row.extraExpenses === undefined || row.extraExpenses === null || row.extraExpenses === '' ? 0 : num(row.extraExpenses, 'مصروفات إضافية', false);
       const exPayer = String(row.extraExpensesPayer || '').trim() || 'customer';
-      const itemsSubtotal = row.itemsSubtotal === undefined || row.itemsSubtotal === null || row.itemsSubtotal === '' ? computedSubtotal : num(row.itemsSubtotal, 'قيمة البضاعة', false);
-      const totalAmount = row.totalAmount === undefined || row.totalAmount === null || row.totalAmount === '' ? itemsSubtotal + (shipPayer === 'customer' ? shipCost : 0) + (exPayer === 'customer' ? exCost : 0) : num(row.totalAmount, 'إجمالي الفاتورة', false);
+      const itemsSubtotal = hasUsableItems
+        ? computedSubtotal
+        : (row.itemsSubtotal === undefined || row.itemsSubtotal === null || row.itemsSubtotal === '' ? computedSubtotal : num(row.itemsSubtotal, 'قيمة البضاعة', false));
+      const recomputedTotal = itemsSubtotal + (shipPayer === 'customer' ? shipCost : 0) + (exPayer === 'customer' ? exCost : 0);
+      const sheetTotal = row.totalAmount === undefined || row.totalAmount === null || row.totalAmount === '' ? null : num(row.totalAmount, 'إجمالي الفاتورة', false);
+      const totalAmount = hasUsableItems ? recomputedTotal : (sheetTotal === null ? recomputedTotal : sheetTotal);
       const downPayment = row.downPayment === undefined || row.downPayment === null || row.downPayment === '' ? 0 : num(row.downPayment, 'المدفوع', false);
-      const remainingBalance = row.remainingBalance === undefined || row.remainingBalance === null || row.remainingBalance === '' ? Math.max(0, totalAmount - downPayment) : num(row.remainingBalance, 'المتبقي', false);
+      const remainingBalance = Math.max(0, totalAmount - downPayment);
       const status = String(row.status || '').trim() || 'new';
       const now = new Date().toISOString();
       const createdAt = String(row.createdAt || '').trim() || timeCell(row) || now;
@@ -703,8 +735,12 @@
       };
       window.addFirestoreDoc(window.STORAGE_KEYS.ORDERS, doc);
       const audits = ['SYNC_CREATE طلب ' + id];
+      const notes = [];
       if (custRes.created) audits.push('SYNC_FALLBACK_CREATE عميل ' + customerId + ' (مرجع غير موجود محلياً — أُنشئ احتياطياً)');
-      return { created: true, entityId: id, entityName: doc.customerName, audits };
+      if (hasUsableItems && sheetTotal !== null && sheetTotal !== recomputedTotal) {
+        notes.push('إجمالي الفاتورة في الشيت (' + sheetTotal + ') لم يُعتمد — أُعيد حسابه من الأصناف (' + recomputedTotal + ') لمنع وصول مبالغ مجمعة إلى الأرصدة');
+      }
+      return { created: true, entityId: id, entityName: doc.customerName, audits, notes };
     }
     const notes = [];
     const payload = {};
@@ -1203,6 +1239,90 @@
     };
   };
 
+  // ----------------------------------------------------------------
+  // V3.15 — Live ArrayFormula for the invoice-total column.
+  // Mirrors the app's invoice-total identity:
+  //   totalAmount = itemsSubtotal
+  //               + IF(shippingPayer='customer', shippingCost, 0)
+  //               + IF(extraExpensesPayer='customer', extraExpenses, 0)
+  // so that a manual edit of shipping/extra in Sheets recomputes
+  // "إجمالي الفاتورة" live. ONLY the real Google transport applies it: the
+  // in-memory transport stays value-based so tests/offline dev keep exact
+  // round-trips. Because the real transport reads back with
+  // valueRenderOption=UNFORMATTED_VALUE, imports receive the computed numbers —
+  // never the formula string — and applyOrder still ignores them whenever the
+  // order carries its items JSON (recomputed from the line items instead).
+  // ----------------------------------------------------------------
+  function colLetter(idx) {
+    let n = idx + 1, s = '';
+    while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+    return s;
+  }
+  function arrayFormulaFor(sheetTitle, cols) {
+    if (sheetTitle !== 'Orders_Sales') return null;
+    const keyAt = function (k) { const i = cols.indexOf(k); return i === -1 ? null : colLetter(i); };
+    const guard = colLetter(0);
+    const sub = keyAt('itemsSubtotal');
+    const shipCost = keyAt('shippingCost');
+    const shipPayer = keyAt('shippingPayer');
+    const exCost = keyAt('extraExpenses');
+    const exPayer = keyAt('extraExpensesPayer');
+    if (!sub || !shipCost || !shipPayer || !exCost || !exPayer) return null;
+    return '=ARRAYFORMULA(IF(' + guard + '2:' + guard + '="",,' + sub + '2:' + sub
+      + '+IF(' + shipPayer + '2:' + shipPayer + '="customer",' + shipCost + '2:' + shipCost + ',0)'
+      + '+IF(' + exPayer + '2:' + exPayer + '="customer",' + exCost + '2:' + exCost + ',0)))';
+  }
+
+  // ----------------------------------------------------------------
+  // OAuth silent renewal (V3.14)
+  // A long-lived refresh_token + client_id/client_secret exchange for a fresh
+  // access_token via the standard Google OAuth2 token endpoint. Never touches
+  // the sheets API; the transport calls it on 401/403 and retries once.
+  // ----------------------------------------------------------------
+  const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
+
+  async function refreshOAuthToken(params) {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: params.clientId,
+      client_secret: params.clientSecret,
+      refresh_token: params.refreshToken
+    }).toString();
+    let res;
+    try {
+      res = await fetch(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+    } catch (e) {
+      throw new Error('فشل الوصول إلى Google للتوكن: ' + (e && e.message ? e.message : String(e)));
+    }
+    let j = null;
+    try { j = await res.json(); } catch (e) { /* ignore non-JSON */ }
+    if (!res.ok) {
+      const detail = (j && (j.error_description || j.error)) || ('HTTP ' + res.status);
+      throw new Error('رفض Google تجديد التوكن: ' + detail);
+    }
+    if (!j || !j.access_token) throw new Error('لم يُرجع Google توكن Access جديد (استجابة غير مكتملة)');
+    return j;
+  }
+
+  /**
+   * Exchange the saved refresh_token for a fresh access token and persist it.
+   * Throws a clear Arabic error when the required fields are missing.
+   */
+  NS.refreshAccessToken = async function (overrides) {
+    const cfg = Object.assign({}, NS.getConfig(), overrides || {});
+    if (!cfg.refreshToken) throw new Error('لا يوجد Refresh Token محفوظ — أضفه في الإعدادات لتجديد التوكن تلقائياً');
+    if (!cfg.clientId) throw new Error('أدخل Client ID أولاً (مطلوب مع Client Secret لتجديد التوكن)');
+    if (!cfg.clientSecret) throw new Error('أدخل Client Secret أولاً (مطلوب مع Refresh Token لتجديد التوكن)');
+    const j = await refreshOAuthToken({ clientId: cfg.clientId, clientSecret: cfg.clientSecret, refreshToken: cfg.refreshToken });
+    const expiresAt = Date.now() + (Number(j.expires_in) || 3600) * 1000;
+    NS.saveConfig({ accessToken: j.access_token, tokenExpiresAt: expiresAt });
+    return j.access_token;
+  };
+
   /**
    * Real Google Sheets API v4 transport (REST). Uses an OAuth access token
    * (config.accessToken) or an API key (config.apiKey) for a public sheet.
@@ -1219,7 +1339,7 @@
     function authQuery() {
       return config.apiKey ? '&key=' + encodeURIComponent(config.apiKey) : '';
     }
-    async function request(url, options) {
+    async function request(url, options, _retried) {
       options = options || {};
       const headers = Object.assign({}, authHeaders(), options.headers || {});
       const q = (url.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(config.apiKey || '');
@@ -1231,11 +1351,32 @@
           const j = await res.json();
           if (j && j.error && j.error.message) msg = j.error.message;
         } catch (e) { /* ignore */ }
-        if ((res.status === 401 || res.status === 403) && config.accessToken) {
-          const expired = Number(config.tokenExpiresAt) > 0 && Date.now() > Number(config.tokenExpiresAt);
-          msg += expired
-            ? ' — انتهت صلاحية التوكن المحفوظ. أعد الربط بحساب Google أو ألصق توكن Access جديد'
-            : ' — التوكن غير صالح أو لم يُفوَّض لهذا الشيت. ألصق توكن Access جديد من نوع OAuth (scope: https://www.googleapis.com/auth/spreadsheets) وأكّد أن حساب Google يملك صلاحية الوصول لهذا الشيت';
+        if (res.status === 401 || res.status === 403) {
+          // V3.14: silent background renewal — if a refresh_token + client
+          // credentials are configured, exchange them for a fresh access token
+          // and retry the failed request exactly once before surfacing an error.
+          const canRefresh = !_retried && config.refreshToken && config.clientId && config.clientSecret;
+          if (canRefresh) {
+            try {
+              const t = await refreshOAuthToken({ clientId: config.clientId, clientSecret: config.clientSecret, refreshToken: config.refreshToken });
+              config.accessToken = t.access_token;
+              const expiresAt = Date.now() + (Number(t.expires_in) || 3600) * 1000;
+              config.tokenExpiresAt = expiresAt;
+              if (config.onTokenRefreshed) config.onTokenRefreshed(t.access_token, expiresAt);
+              return request(url, options, true);
+            } catch (e2) {
+              msg += ' — فشل التجديد التلقائي عبر Refresh Token: ' + (e2 && e2.message ? e2.message : String(e2));
+            }
+          } else {
+            const expired = Number(config.tokenExpiresAt) > 0 && Date.now() > Number(config.tokenExpiresAt);
+            if (expired && config.refreshToken) {
+              msg += ' — انتهت صلاحية التوكن المحفوظ ولم ينجح التجديد التلقائي. تحقق من Client ID / Client Secret / Refresh Token أو أعد الربط بحساب Google';
+            } else if (expired) {
+              msg += ' — انتهت صلاحية التوكن المحفوظ. أعد الربط بحساب Google أو ألصق توكن Access جديد';
+            } else {
+              msg += ' — التوكن غير صالح أو لم يُفوَّض لهذا الشيت. ألصق توكن Access جديد من نوع OAuth (scope: https://www.googleapis.com/auth/spreadsheets) وأكّد أن حساب Google يملك صلاحية الوصول لهذا الشيت';
+            }
+          }
         }
         const err = new Error('فشل الاتصال بـ Google Sheets: ' + msg);
         err.status = res.status;
@@ -1315,6 +1456,21 @@
           rows.forEach(r => {
             values.push(cols.map(k => formatExportCell(k, (r[k] !== undefined && r[k] !== null ? r[k] : ''))));
           });
+          // V3.15 — live ArrayFormula for "إجمالي الفاتورة": only the REAL
+          // transport applies it. The column's data cells are left blank and the
+          // formula (entered in the first data row) fills the whole column, so
+          // the array never collides with pre-written values. Google returns the
+          // computed numbers when read (UNFORMATTED_VALUE), keeping import safe.
+          if (values.length > 1) {
+            const f = arrayFormulaFor(title, cols);
+            if (f) {
+              const idx = cols.indexOf('totalAmount');
+              if (idx !== -1) {
+                for (let r = 1; r < values.length; r++) values[r][idx] = '';
+                values[1][idx] = f;
+              }
+            }
+          }
           const body = { values };
           const range = title + '!A1';
           // NOTE: values.clear does NOT accept valueInputOption (unknown query
@@ -1343,7 +1499,13 @@
       accessToken: merged.accessToken,
       apiKey: merged.apiKey,
       tokenExpiresAt: merged.tokenExpiresAt,
-      clientId: merged.clientId
+      clientId: merged.clientId,
+      clientSecret: merged.clientSecret,
+      refreshToken: merged.refreshToken,
+      onTokenRefreshed: function (token, expiresAt) {
+        // Persist the silently-renewed token so every future request uses it.
+        NS.saveConfig({ accessToken: token, tokenExpiresAt: expiresAt });
+      }
     });
     NS.setTransport(transport);
     return transport;
@@ -1368,10 +1530,16 @@
       '  <label>Client ID (لتسجيل الدخول عبر حساب Google — اختياري)' +
       '    <input id="gs-client-id" type="text" placeholder="xxxx.apps.googleusercontent.com" style="' + inputStyle + '" value="' + (cfg.clientId || '') + '">' +
       '  </label>',
+      '  <label>Client Secret (مطلوب مع Refresh Token للتجديد التلقائي — اختياري)' +
+      '    <input id="gs-client-secret" type="password" placeholder="GOCSPX-..." style="' + inputStyle + '" value="' + (cfg.clientSecret || '') + '">' +
+      '  </label>',
       '  <label>OAuth Access Token (أو ربط بحساب Google)' +
       '    <input id="gs-token" type="password" placeholder="ألصق التوكن هنا أو اضغط زر الربط" style="' + inputStyle + '" value="' + (cfg.accessToken || '') + '">' +
       '  </label>',
       '  <div id="gs-token-meta" style="color:#94a3b8;font-size:11px"></div>',
+      '  <label>Refresh Token (طويل الأمد — يجدد Access Token تلقائياً عند انتهائه)' +
+      '    <input id="gs-refresh-token" type="password" placeholder="1//0g..." style="' + inputStyle + '" value="' + (cfg.refreshToken || '') + '">' +
+      '  </label>',
       '  <label>API Key (بديل للشيت العام — اختياري)' +
       '    <input id="gs-api-key" type="password" placeholder="AIza..." style="' + inputStyle + '" value="' + (cfg.apiKey || '') + '">' +
       '  </label>',
@@ -1431,11 +1599,15 @@
         parts.push('توكن محفوظ: ' + mask(c.accessToken));
         const exp = Number(c.tokenExpiresAt) || 0;
         if (exp) {
-          parts.push(exp > Date.now() ? 'صالح حتى ' + new Date(exp).toLocaleString('ar-EG') : 'منتهي الصلاحية — أعد الربط');
+          parts.push(c.refreshToken && exp <= Date.now()
+            ? 'منتهي — سيُجدد تلقائياً في أول عملية (Refresh Token)'
+            : (exp > Date.now() ? 'صالح حتى ' + new Date(exp).toLocaleString('ar-EG') : 'منتهي الصلاحية — أعد الربط'));
         }
       } else {
-        parts.push('لا يوجد توكن بعد');
+        parts.push(c.refreshToken ? 'لا يوجد Access حالياً — سيُستعاد تلقائياً من Refresh Token' : 'لا يوجد توكن بعد');
       }
+      if (c.refreshToken) parts.push('Refresh Token محفوظ ✓');
+      if (c.clientSecret) parts.push('Client Secret محفوظ ✓');
       if (c.apiKey) parts.push('API Key محفوظ');
       meta.textContent = parts.join(' • ');
     };
@@ -1452,6 +1624,8 @@
       const saved = NS.saveConfig({
         spreadsheetId: wrap.querySelector('#gs-sheet-id').value,
         clientId: wrap.querySelector('#gs-client-id').value.trim(),
+        clientSecret: wrap.querySelector('#gs-client-secret').value.trim(),
+        refreshToken: wrap.querySelector('#gs-refresh-token').value.trim(),
         accessToken: wrap.querySelector('#gs-token').value.trim(),
         apiKey: wrap.querySelector('#gs-api-key').value.trim(),
         direction: wrap.querySelector('#gs-direction').value,
@@ -1462,12 +1636,17 @@
       return saved;
     };
 
-    // Silent re-auth via Google Identity Services when the stored OAuth token
-    // is known-expired (only possible over https://; file:// must paste manually).
+    // Silent re-auth when the stored OAuth token is known-expired. V3.14: the
+    // preferred path is the long-lived Refresh Token (a plain HTTPS exchange
+    // that works on https:// AND file://); Google Identity Services (popup) is
+    // only the fallback when no Refresh Token is configured.
     const refreshExpiredToken = () => {
       const c = NS.getConfig();
       const exp = Number(c.tokenExpiresAt) || 0;
       if (!c.accessToken || !(exp > 0) || Date.now() <= exp) return Promise.resolve();
+      if (c.refreshToken && c.clientId && c.clientSecret) {
+        return NS.refreshAccessToken().then(function (tok) { renderTokenMeta(); return tok; });
+      }
       if (!c.clientId || !window.google || !window.google.accounts || !window.google.accounts.oauth2) {
         return Promise.reject(new Error('انتهت صلاحية التوكن المحفوظ — أعد الربط بحساب Google أو ألصق توكن Access جديد'));
       }
@@ -1562,7 +1741,10 @@
       NS.saveConfig({ accessToken: '', tokenExpiresAt: 0, apiKey: '' });
       NS.setTransport(null);
       renderTokenMeta();
-      updateStatus('تم مسح التوكن — لن تعمل المزامنة حتى تعيد الربط');
+      const c = NS.getConfig();
+      updateStatus(c.refreshToken
+        ? 'تم مسح Access Token — سيُستعاد تلقائياً من Refresh Token عند أول مزامنة'
+        : 'تم مسح التوكن — لن تعمل المزامنة حتى تعيد الربط');
     });
 
     wrap.querySelector('#gs-test').addEventListener('click', async () => {

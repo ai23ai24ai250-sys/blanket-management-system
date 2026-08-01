@@ -155,6 +155,9 @@ window.createOrder = function({ customerInfo, items, downPayment = 0, shippingCo
       paymentMethod: 'cash',
       notes: paidInFull ? `تحصيل كامل قيمة الفاتورة رقم ${newOrder.id}` : `دفعة مقدمة (عربون) للطلب رقم ${newOrder.id}`,
       isDownPayment: true,
+      type: 'deposit',
+      refOrderId: newOrder.id,
+      cycleKey: 'deposit',
       createdBy
     });
   }
@@ -346,6 +349,9 @@ function handleDepositRefund(order, refundAmount, note) {
       date: new Date().toISOString().split('T')[0],
       paymentMethod: 'cash',
       notes: note || `إرجاع عربون للعميل عن الطلب الملغي رقم ${order.id}`,
+      type: 'refund',
+      refOrderId: order.id,
+      cycleKey: 'refund-' + refundAmt,
       createdBy: 'المدير العام'
     });
   }
@@ -399,6 +405,9 @@ window.updateOrderStatus = function(orderId, newStatus, refundAmount) {
         paymentMethod: 'cash',
         isDownPayment: true,
         notes: `إعادة تسجيل دفعة / رد مبلغ للطلب رقم ${currentOrder.id} بعد إعادة تفعيله`,
+        type: 'deposit',
+        refOrderId: currentOrder.id,
+        cycleKey: 'recredit-' + reCreditAmount,
         createdBy: 'المدير العام'
       });
     }
@@ -520,6 +529,9 @@ window.updateOrderStatus = function(orderId, newStatus, refundAmount) {
               date: new Date().toISOString().split('T')[0],
               paymentMethod: 'cash',
               notes: `رد مبلغ مسدد / تسوية مرتجع للطلب رقم ${currentOrder.id}`,
+              type: 'refund',
+              refOrderId: currentOrder.id,
+              cycleKey: 'autoRefund-' + autoRefund,
               createdBy: 'المدير العام'
             });
           }
@@ -553,6 +565,9 @@ window.updateOrderStatus = function(orderId, newStatus, refundAmount) {
         paymentMethod: 'cash',
         isDownPayment: true,
         notes: `تحصيل كامل المتبقي عند إتمام الفاتورة رقم ${currentOrder.id} (مكتمل نهائي)`,
+        type: 'settle',
+        refOrderId: currentOrder.id,
+        cycleKey: 'settle',
         createdBy: 'المدير العام'
       });
 

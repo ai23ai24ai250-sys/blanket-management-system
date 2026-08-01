@@ -75,7 +75,12 @@ window.buildCustomerStatementEntries = function(customerId) {
   entries.sort((a, b) => (a.sortKey || '').localeCompare(b.sortKey || '') || (a.seq - b.seq));
 
   const netEntries = entries.reduce((s, e) => s + (e.debit - e.credit), 0);
-  const opening = Math.max(0, (Number(customer.remainingBalance) || 0) - netEntries);
+  // V3.15.1 — Reconciliation guard: the opening row may legitimately absorb
+  // legacy pre-ledger drift (reconGap > 0), but when the net entries EXCEED the
+  // stored balance (reconGap < 0) the statement can never reconcile — the old
+  // Math.max(0, ...) silently clamped it and faked a match. Surface it instead.
+  const reconGap = (Number(customer.remainingBalance) || 0) - netEntries;
+  const opening = Math.max(0, reconGap);
 
   const rows = [];
   if (opening !== 0) {
@@ -96,6 +101,10 @@ window.buildCustomerStatementEntries = function(customerId) {
     running = running + e.debit - e.credit;
     rows.push({ ...e, balance: running });
   });
+
+  if (reconGap < 0) {
+    rows.reconWarning = `عدم تطابق في الكشف: صافي الحركات يتجاوز الرصيد المخزن بمقدار ${window.formatCurrency(Math.abs(reconGap))} — راجع سجلات الدفعات للعميل`;
+  }
 
   return rows;
 };
@@ -153,13 +162,18 @@ window.buildSupplierStatementEntries = function(supplierId) {
 /**
  * Shared banking-style statement table renderer with running balance.
  */
-window.renderBankStatementTable = function({ entityName, entitySub = '', closingLabel, closingValue, closingColor = 'text-rose-400', rows, emptyMessage, debitLabel = 'مدين', creditLabel = 'دائن', closingBadge = '' }) {
+window.renderBankStatementTable = function({ entityName, entitySub = '', closingLabel, closingValue, closingColor = 'text-rose-400', rows, emptyMessage, debitLabel = 'مدين', creditLabel = 'دائن', closingBadge = '', reconWarning = '' }) {
   const totalDebit = rows.reduce((s, r) => s + (Number(r.debit) || 0), 0);
   const totalCredit = rows.reduce((s, r) => s + (Number(r.credit) || 0), 0);
   const lastBalance = rows.length ? rows[rows.length - 1].balance : 0;
 
   return `
     <div class="space-y-4">
+      ${reconWarning ? `
+        <div class="p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold leading-relaxed">
+          ⚠️ ${reconWarning}
+        </div>
+      ` : ''}
       <div class="p-4 bg-slate-850 rounded-xl border border-slate-800 flex justify-between items-center flex-wrap gap-3">
         <div>
           <h4 class="font-bold text-white text-base">${entityName}</h4>
@@ -246,6 +260,7 @@ window.renderCustomerStatementHTML = function(customerId) {
     creditLabel: 'سدده (تحصيل -)',
     closingBadge: badge,
     rows,
+    reconWarning: rows.reconWarning || '',
     emptyMessage: 'لا توجد فواتير أو دفعات مسجلة لهذا العميل'
   });
 };

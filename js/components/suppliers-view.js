@@ -70,8 +70,8 @@ function renderSupplierRows(suppliersList) {
     <tr>
       <td class="font-bold text-purple-400">${s.id}</td>
       <td class="font-bold text-white">${s.name}</td>
-      <td class="num-font text-slate-300 font-mono">${s.phone || '—'}${s.secondaryPhone ? `<div class="text-[10px] text-slate-500 font-mono">${s.secondaryPhone}</div>` : ''}</td>
-      <td class="text-slate-400 text-xs">${s.address || '—'}</td>
+      <td class="num-font text-slate-300 font-mono">${window.formatPhonePair(s.phone, s.secondaryPhone)}</td>
+      <td class="text-slate-400 text-xs whitespace-normal break-words">${window.formatAddress(s.address)}</td>
       <td class="num-font text-white font-bold">${window.formatCurrency(s.totalPurchases)}</td>
       <td class="num-font text-emerald-400 font-bold">${window.formatCurrency(s.paid)}</td>
       <td class="num-font font-extrabold ${Number(s.remainingBalance) > 0 ? 'text-purple-400' : 'text-slate-400'} text-base">

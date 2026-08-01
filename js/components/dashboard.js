@@ -7,7 +7,9 @@ window.renderDashboard = function() {
   const orders = window.getOrders();
   const calc = window.calculateNetProfit(orders);
 
-  const totalSales = calc.itemsSales;
+  // V3.15 — Unified: Gross Sales = sum of invoice totals (items + customer-paid
+  // shipping/extra). Always equals إجمالي الفواتير — the two can never drift apart.
+  const totalSales = calc.grossSales;
   const netProfit = calc.netProfit;
 
   // Total Inventory Valuation
@@ -59,7 +61,7 @@ window.renderDashboard = function() {
             </div>
           </div>
           <div class="text-lg font-extrabold text-white num-font mb-1">${window.formatCurrency(totalSales)}</div>
-          <span class="text-[10px] text-emerald-400 font-medium">مبيعات البضاعة الصافية (بدون شحن أو مصاريف العميل)</span>
+          <span class="text-[10px] text-emerald-400 font-medium">إجمالي الفواتير المؤكدة (شامل شحن ومصاريف العميل)</span>
         </div>
 
         <!-- Total Inventory Valuation Card -->
@@ -250,7 +252,7 @@ window.renderDashboard = function() {
                 <tr>
                   <td class="font-bold text-brand-400">${o.id}</td>
                   <td class="font-bold text-white">${o.customerName}</td>
-                  <td class="num-font text-slate-300">${o.customerPhone}${o.customerSecondaryPhone ? ' / ' + o.customerSecondaryPhone : ''}</td>
+                  <td class="num-font text-slate-300">${window.formatPhonePair(o.customerPhone, o.customerSecondaryPhone)}</td>
                   <td class="num-font font-bold text-white">${window.formatCurrency(o.totalAmount)}</td>
                   <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
                   <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>

@@ -4,7 +4,7 @@
  */
 
 window.renderPaymentsView = function() {
-  const payments = window.getPayments();
+  const payments = window.getPaymentsSorted();
 
   return `
     <div class="space-y-6 animate-fadeIn">
@@ -80,8 +80,8 @@ function renderPaymentRows(paymentsList) {
       <td class="font-bold text-white">${p.entityName}</td>
       <td class="num-font font-extrabold ${isRefund ? 'text-rose-400' : 'text-emerald-400'} text-base">${window.formatCurrency(p.amount)}</td>
       <td class="text-xs text-slate-300">${p.paymentMethod === 'cash' ? 'نقدي (كاش)' : p.paymentMethod === 'transfer' ? 'تحويل بنكي / فودافون كاش' : p.paymentMethod === 'check' ? 'شيك بنكي' : 'أخرى'}</td>
-      <td class="text-slate-400 text-xs">${p.notes || '—'}</td>
-      <td class="text-xs text-slate-400">${p.date}</td>
+      <td class="text-slate-400 text-xs whitespace-normal break-words">${p.notes || '—'}</td>
+      <td class="text-xs text-slate-400 num-font whitespace-nowrap">${window.formatDate(p.createdAt || p.date)}</td>
       <td class="text-xs text-slate-400">${p.createdBy || 'المدير العام'}</td>
     </tr>
   `;

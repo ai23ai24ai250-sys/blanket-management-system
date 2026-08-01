@@ -41,20 +41,54 @@ window.formatCurrency = function(amount) {
   }).format(num);
 };
 
+/**
+ * V3.15 — Unified ISO/Standard display timestamp across ALL screens
+ * (Orders, Payments, Dashboard, Statements): YYYY-MM-DD HH:mm.
+ * Identical to the format the Google Sheets export writes, so what you see on
+ * screen always matches what is stored/exported (no locale/numeral drift).
+ */
 window.formatDate = function(isoString) {
   if (!isoString) return '—';
   try {
     const date = new Date(isoString);
-    return new Intl.DateTimeFormat('ar-EG', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+    if (isNaN(date.getTime())) return String(isoString);
+    const p = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}`;
   } catch (e) {
-    return isoString;
+    return String(isoString);
   }
+};
+
+/**
+ * V3.15 — NaN-immunity for all aggregation math.
+ * undefined / null / '' / NaN / '   ' all collapse to 0 so a financial
+ * aggregate can NEVER produce NaN or undefined (works with sheet-imported rows).
+ */
+window.toNumber = function(v) {
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+};
+
+/**
+ * V3.15 — Composite phone display helper (Fallback):
+ *   primary + secondary → "0101xxxx / 0102xxxx"
+ *   primary only        → "0101xxxx"
+ *   neither             → "—"
+ * Used by customers, suppliers, orders, reports & dashboard tables.
+ */
+window.formatPhonePair = function(primary, secondary) {
+  const p = String(primary || '').trim();
+  const s = String(secondary || '').trim();
+  if (p) return s ? p + ' / ' + s : p;
+  return s || '—';
+};
+
+/**
+ * V3.15 — Full address display helper: never truncates, collapses empty to '—'.
+ */
+window.formatAddress = function(address) {
+  const s = String(address || '').trim();
+  return s || '—';
 };
 
 /**
@@ -120,8 +154,23 @@ window.getOrderStatusLabel = function(status) {
 };
 
 /**
- * Shared Net Profit Calculation
- * Used by Dashboard & Reports to avoid duplication
+ * V3.15 — Unified Financial Engine (Dashboard + Reports + Statements use this).
+ *
+ * Single source of truth for every money figure, with these identities:
+ *   Order Total       = itemsSubtotal + (shipping if payer 'customer') + (extra if payer 'customer')
+ *   Gross Sales       = Σ(itemsSubtotal) + Σ(customer-paid shipping) + Σ(customer-paid extra)
+ *                     = Σ(order totals)  → ALWAYS equals إجمالي الفواتير (no 1,000₴ drift).
+ *   Merchant Expenses = Σ(shipping if payer 'merchant') + Σ(extra if payer 'merchant')
+ *                     (the single bucket "مصاريف الشحن والتشغيل للتاجر").
+ *   Gross Profit      = Gross Sales − COGS − Merchant Expenses
+ *                       (additive informational metric; includes client-pass-through)
+ *   Net Profit        = (Items Sales − COGS − Merchant Expenses)
+ *                       − Operational Expenses + Retained-Deposit Income
+ *   ⚠ Net Profit deliberately keeps its historical merchandise base: client-paid
+ *   shipping/extra are collected for carriers and never count as store profit,
+ *   so it stays items-based even though إجمالي المبيعات/Gross Sales equal the
+ *   invoice totals.
+ *
  * V3.8: Sales & Net Profit include ONLY fulfilled orders (delivered/completed).
  *   - Pending ('new') orders are excluded (not yet shipped).
  *   - Returned (مرتجع) orders: goods reverted, but the merchant's shipping/fees
@@ -130,22 +179,27 @@ window.getOrderStatusLabel = function(status) {
  */
 window.calculateNetProfit = function(orders) {
   const fulfilledOrders = orders.filter(o => window.isFulfilledOrderStatus(o.status));
-
-  // Grand invoice totals (items + any shipping/fees the CLIENT pays) — display only.
-  const totalSales = fulfilledOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+  const toNum = window.toNumber;
 
   // Merchandise selling price ONLY (profit base). Shipping/extra fees paid by the
   // client are collected on behalf of carriers/delivery services and MUST NOT be
   // counted as store profit, so they are excluded from the profit base.
   const itemsSales = fulfilledOrders.reduce((sum, o) => {
-    const itemsSubtotal = Number(o.itemsSubtotal)
-      || (o.items || []).reduce((s, i) => s + ((Number(i.sellingPrice) || 0) * (Number(i.quantity) || 0)), 0);
+    const itemsSubtotal = toNum(o.itemsSubtotal)
+      || (o.items || []).reduce((s, i) => s + (toNum(i.sellingPrice) * toNum(i.quantity)), 0);
     return sum + itemsSubtotal;
   }, 0);
 
+  // Grand invoice totals (items + any shipping/fees the CLIENT pays) — display only.
+  // Gross Sales identity: items + customer-paid shipping + customer-paid extra.
+  const customerShippingTotal = fulfilledOrders.reduce((sum, o) => sum + (o.shippingPayer === 'customer' ? toNum(o.shippingCost) : 0), 0);
+  const customerExtraExpensesTotal = fulfilledOrders.reduce((sum, o) => sum + (o.extraExpensesPayer === 'customer' ? toNum(o.extraExpenses) : 0), 0);
+  const grossSales = itemsSales + customerShippingTotal + customerExtraExpensesTotal;
+  const totalSales = fulfilledOrders.reduce((sum, o) => sum + toNum(o.totalAmount), 0);
+
   const cogs = fulfilledOrders.reduce((totalCogs, order) => {
     const orderCogs = (order.items || []).reduce((itemSum, item) => {
-      return itemSum + ((Number(item.purchasePrice) || 0) * (Number(item.quantity) || 0));
+      return itemSum + (toNum(item.purchasePrice) * toNum(item.quantity));
     }, 0);
     return totalCogs + orderCogs;
   }, 0);
@@ -155,14 +209,16 @@ window.calculateNetProfit = function(orders) {
   // Cancelled orders never shipped → their shipping cost is $0.
   const shippedOrders = orders.filter(o => window.isFulfilledOrderStatus(o.status) || o.status === 'returned');
 
-  const merchantShippingTotal = shippedOrders.reduce((sum, o) => sum + (o.shippingPayer === 'merchant' ? (Number(o.shippingCost) || 0) : 0), 0);
+  const merchantShippingTotal = shippedOrders.reduce((sum, o) => sum + (o.shippingPayer === 'merchant' ? toNum(o.shippingCost) : 0), 0);
   // Extra expenses are only a merchant cost when the merchant pays them.
   // When the customer pays (extraExpensesPayer === 'customer', the default), they are already
   // included in totalAmount => totalSales, so the merchant breaks even and they are NOT deducted.
-  const merchantExtraExpensesTotal = shippedOrders.reduce((sum, o) => sum + (o.extraExpensesPayer === 'merchant' ? (Number(o.extraExpenses) || 0) : 0), 0);
+  const merchantExtraExpensesTotal = shippedOrders.reduce((sum, o) => sum + (o.extraExpensesPayer === 'merchant' ? toNum(o.extraExpenses) : 0), 0);
+  // Unified single bucket: "مصاريف الشحن والتشغيل للتاجر".
+  const merchantExpenses = merchantShippingTotal + merchantExtraExpensesTotal;
 
   const expenses = window.getExpenses ? window.getExpenses() : [];
-  const totalOpExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const totalOpExpenses = expenses.reduce((sum, e) => sum + toNum(e.amount), 0);
 
   // V3.4 + V3.10: Retained deposits from CANCELLED and RETURNED orders count as
   // operational shipping/processing income. Only new-style cancellations/returns
@@ -174,7 +230,7 @@ window.calculateNetProfit = function(orders) {
   // EXCLUDED here so it is never double-counted into product net profit.
   const retainedDepositIncome = orders
     .filter(o => (o.status === 'cancelled' || o.status === 'returned') && typeof o.retainedDeposit === 'number')
-    .reduce((sum, o) => sum + (Math.max(0, Number(o.retainedDeposit) || 0) - window.getOrderRetainedShippingDeposit(o)), 0);
+    .reduce((sum, o) => sum + (Math.max(0, toNum(o.retainedDeposit)) - window.getOrderRetainedShippingDeposit(o)), 0);
 
   // V3.11 — Shipping & Packaging Revenue (إيراد خدمات شحن ونقل): the portion of
   // deposits designated to shipping/packaging services, counted for EVERY order
@@ -183,9 +239,16 @@ window.calculateNetProfit = function(orders) {
   // profit; reported as a separate line in reports & dashboard.
   const shippingRevenueIncome = orders.reduce((sum, o) => sum + window.getOrderShippingRevenue(o), 0);
 
-  const netProfit = (itemsSales - cogs) - merchantShippingTotal - merchantExtraExpensesTotal - totalOpExpenses + retainedDepositIncome;
+  // Gross Profit (additive, display-only): the spec identity
+  // "Gross Sales − COGS − Merchant Expenses".
+  const grossProfit = grossSales - cogs - merchantExpenses;
+  // V3.15 — Net Profit keeps its tested semantics: the merchandise profit base
+  // ONLY (customer-paid shipping/extra are collected for carriers and never
+  // counted as store profit), minus merchant expenses, minus operational/admin
+  // expenses, plus retained-deposit income.
+  const netProfit = (itemsSales - cogs) - merchantExpenses - totalOpExpenses + retainedDepositIncome;
 
-  return { totalSales, itemsSales, cogs, merchantShippingTotal, merchantExtraExpensesTotal, totalOpExpenses, retainedDepositIncome, shippingRevenueIncome, netProfit };
+  return { totalSales, grossSales, itemsSales, customerShippingTotal, customerExtraExpensesTotal, cogs, merchantShippingTotal, merchantExtraExpensesTotal, merchantExpenses, grossProfit, totalOpExpenses, retainedDepositIncome, shippingRevenueIncome, netProfit };
 };
 
 /**

@@ -82,7 +82,7 @@ function renderOrdersTableRows(ordersList) {
       <tr>
         <td class="font-bold text-brand-400 font-mono text-xs">${o.id}</td>
         <td class="font-bold text-white">${o.customerName}</td>
-        <td class="num-font text-slate-300 font-mono text-xs">${o.customerPhone}${o.customerSecondaryPhone ? ' / ' + o.customerSecondaryPhone : ''}</td>
+        <td class="num-font text-slate-300 font-mono text-xs">${window.formatPhonePair(o.customerPhone, o.customerSecondaryPhone)}</td>
         <td class="num-font font-bold text-white">${window.formatCurrency(o.totalAmount)}</td>
         <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
         <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>

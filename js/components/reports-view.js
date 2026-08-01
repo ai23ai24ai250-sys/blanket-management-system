@@ -112,11 +112,10 @@ function renderSalesReport(filteredOrders) {
   const customers = window.getCustomers();
   const calc = window.calculateNetProfit(filteredOrders);
 
-  const grossSales = calc.totalSales;
+  const grossSales = calc.grossSales;
   const itemsSales = calc.itemsSales;
   const cogs = calc.cogs;
-  const merchantShippingTotal = calc.merchantShippingTotal;
-  const orderExtraExpensesTotal = calc.merchantExtraExpensesTotal;
+  const merchantExpenses = calc.merchantExpenses;
   const totalOpExpenses = calc.totalOpExpenses;
   const netProfit = calc.netProfit;
 
@@ -159,9 +158,9 @@ function renderSalesReport(filteredOrders) {
         </div>
 
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
-          <span class="text-xs text-slate-400 font-bold block mb-1">شحن ومصاريف التاجر</span>
-          <span class="text-lg font-bold text-purple-400 num-font">${window.formatCurrency(merchantShippingTotal + orderExtraExpensesTotal)}</span>
-          <span class="text-[10px] text-slate-500 block mt-1">التي تحملها التاجر فقط (0 إذا دفعها العميل)</span>
+          <span class="text-xs text-slate-400 font-bold block mb-1">مصاريف الشحن والتشغيل للتاجر</span>
+          <span class="text-lg font-bold text-purple-400 num-font">${window.formatCurrency(merchantExpenses)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">شحن + مصروفات تحملها التاجر فقط (0 إذا دفعها العميل)</span>
         </div>
 
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
@@ -272,7 +271,7 @@ function renderSalesReport(filteredOrders) {
                   <tr>
                     <td class="font-bold text-brand-400">${o.id}</td>
                     <td class="font-bold text-white">${o.customerName}</td>
-                    <td class="num-font text-slate-300 font-mono">${o.customerPhone}${o.customerSecondaryPhone ? ' / ' + o.customerSecondaryPhone : ''}</td>
+                    <td class="num-font text-slate-300 font-mono">${window.formatPhonePair(o.customerPhone, o.customerSecondaryPhone)}</td>
                     <td class="num-font font-bold text-white">${window.formatCurrency(o.totalAmount)}</td>
                     <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
                     <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>
