@@ -508,12 +508,21 @@ window.saveCollection = function(key, data) {
   }
 };
 
+// Best-effort hook for the Google Sheets sync module (every-op mode). Safe to
+// call before/without the module loaded — it is a no-op then.
+function _notifySheetsSync() {
+  if (window.GoogleSheetsSync && typeof window.GoogleSheetsSync.scheduleSync === 'function') {
+    try { window.GoogleSheetsSync.scheduleSync(); } catch (e) { /* never break the write path */ }
+  }
+}
+
 window.addFirestoreDoc = function(collectionKey, docData) {
   if (!window.firestoreCache[collectionKey]) {
     window.firestoreCache[collectionKey] = [];
   }
   window.firestoreCache[collectionKey].unshift(docData);
   localStorage.setItem(`bms_data_${collectionKey}`, JSON.stringify(window.firestoreCache[collectionKey]));
+  _notifySheetsSync();
 
   if (window.db && docData.id) {
     window.db.collection(collectionKey).doc(docData.id).set(docData)
@@ -539,6 +548,7 @@ window.updateFirestoreDoc = function(collectionKey, docId, updatedFields) {
       localStorage.setItem(`bms_data_${collectionKey}`, JSON.stringify(window.firestoreCache[collectionKey]));
     }
   }
+  _notifySheetsSync();
 
   if (window.db && docId) {
     // Upsert (set + merge) instead of update(): a partial update can never fail
@@ -582,6 +592,7 @@ window.deleteFirestoreDoc = async function(collectionKey, docId) {
       _removeFromCache(collectionKey, docId);
       window.firestoreLastSyncAt = new Date().toISOString();
       window.firestoreLastSyncSource = 'delete';
+      _notifySheetsSync();
       return true;
     } catch (err) {
       // ❌ Server rejected / unreachable: surface it, keep the item locally.
@@ -603,6 +614,7 @@ window.deleteFirestoreDoc = async function(collectionKey, docId) {
   _removeFromCache(collectionKey, docId);
   _addTombstone(docId);
   window.queueFirestoreOp({ kind: 'delete', collection: collectionKey, docId });
+  _notifySheetsSync();
   return true;
 };
 

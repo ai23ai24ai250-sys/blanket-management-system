@@ -129,6 +129,13 @@ function renderSalesReport(filteredOrders) {
   const netTreasury = totalInflow - totalRefunds;
   const retainedDepositIncome = calc.retainedDepositIncome || 0;
 
+  // قيد الانتظار (pending / status 'new'): not confirmed sales yet — their value is NOT
+  // part of confirmed goods sales, but their collected deposits ARE real treasury cash.
+  const pendingOrders = filteredOrders.filter(o => o.status === 'new');
+  const pendingTotalValue = pendingOrders.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+  const pendingCollectedDeposits = pendingOrders.reduce((s, o) => s + (Number(o.downPayment) || 0), 0);
+  const pendingShippingDeposits = pendingOrders.reduce((s, o) => s + window.getOrderShippingRevenue(o), 0);
+
   return `
     <div class="space-y-6">
       
@@ -178,6 +185,7 @@ function renderSalesReport(filteredOrders) {
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
           <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي المقبوضات (وارد الخزينة)</span>
           <span class="text-lg font-extrabold text-emerald-400 num-font">${window.formatCurrency(totalInflow)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">يشمل عربون الطلبات قيد الانتظار المحصَّل نقداً</span>
         </div>
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
           <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي المردودات والاستردادات (صادر)</span>
@@ -196,7 +204,26 @@ function renderSalesReport(filteredOrders) {
         <div class="p-4 bg-sky-950/30 rounded-xl border border-sky-800/40">
           <span class="text-xs text-sky-300 font-bold block mb-1">إيراد خدمات شحن ونقل 🚚</span>
           <span class="text-lg font-extrabold text-sky-400 num-font">${window.formatCurrency(calc.shippingRevenueIncome || 0)}</span>
-          <span class="text-[10px] text-slate-500 block mt-1">من عربون الشحن/التغليف — بند منفصل لا يدخل في صافي ربح المنتجات</span>
+          <span class="text-[10px] text-slate-500 block mt-1">عربون الشحن/التغليف المحصَّل بجميع الحالات (شامل قيد الانتظار) — بند منفصل لا يدخل في صافي ربح المنتجات</span>
+        </div>
+      </div>
+
+      <!-- Pending Orders Clarification (قيد الانتظار): value not confirmed, deposits already in treasury -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="p-4 bg-amber-950/20 rounded-xl border border-amber-800/40">
+          <span class="text-xs text-amber-300 font-bold block mb-1">فواتير قيد الانتظار (غير مؤكدة البيع)</span>
+          <span class="text-lg font-extrabold text-amber-400 num-font">${pendingOrders.length} فاتورة</span>
+          <span class="text-[10px] text-slate-500 block mt-1">لم تُشحن بعد — لا تدخل في مبيعات البضاعة المؤكدة ولا صافي الربح</span>
+        </div>
+        <div class="p-4 bg-amber-950/20 rounded-xl border border-amber-800/40">
+          <span class="text-xs text-amber-300 font-bold block mb-1">إجمالي قيمة فواتير قيد الانتظار</span>
+          <span class="text-lg font-extrabold text-white num-font">${window.formatCurrency(pendingTotalValue)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">إجمالي الفاتورة (بضاعة + شحن/مصاريف العميل)</span>
+        </div>
+        <div class="p-4 bg-amber-950/20 rounded-xl border border-amber-800/40">
+          <span class="text-xs text-amber-300 font-bold block mb-1">عربون محصَّل من قيد الانتظار (نقداً بالخزينة)</span>
+          <span class="text-lg font-extrabold text-emerald-400 num-font">${window.formatCurrency(pendingCollectedDeposits)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">مقبوضات فعلية تظهر فوراً في وارد الخزينة — و${window.formatCurrency(pendingShippingDeposits)} منها ضمن إيراد الشحن</span>
         </div>
       </div>
 

@@ -177,8 +177,10 @@ window.calculateNetProfit = function(orders) {
     .reduce((sum, o) => sum + (Math.max(0, Number(o.retainedDeposit) || 0) - window.getOrderRetainedShippingDeposit(o)), 0);
 
   // V3.11 — Shipping & Packaging Revenue (إيراد خدمات شحن ونقل): the portion of
-  // deposits designated to shipping/packaging services. Kept outside merchandise
-  // sales and product net profit; reported as a separate line in reports & dashboard.
+  // deposits designated to shipping/packaging services, counted for EVERY order
+  // status (including قيد الانتظار pending orders) because their deposits have
+  // already entered the treasury. Kept outside merchandise sales and product net
+  // profit; reported as a separate line in reports & dashboard.
   const shippingRevenueIncome = orders.reduce((sum, o) => sum + window.getOrderShippingRevenue(o), 0);
 
   const netProfit = (itemsSales - cogs) - merchantShippingTotal - merchantExtraExpensesTotal - totalOpExpenses + retainedDepositIncome;
@@ -215,19 +217,17 @@ window.computeShippingRevenueDeposit = function(depositType, downPayment, shippi
 };
 
 /**
- * Shipping & Packaging revenue recognized from an order at its current status:
- *   - fulfilled (delivered/completed): the full designated portion (kept).
- *   - cancelled/returned: only the RETAINED part (designated − refunded).
- *   - pending ('new'): nothing yet.
+ * Shipping & Packaging revenue recognized from an order (إيراد خدمات شحن ونقل).
+ * Counts the designated deposit portion ACTUALLY collected in cash — i.e.
+ * shippingRevenueDeposit minus whatever was refunded back to the customer.
+ * This is status-independent: deposits of قيد الانتظار (pending) orders have
+ * already entered the treasury, so they count immediately, exactly like
+ * delivered/completed/returned/cancelled orders.
  */
 window.getOrderShippingRevenue = function(order) {
   const base = Number(order.shippingRevenueDeposit) || 0;
   if (!base) return 0;
-  if (window.isFulfilledOrderStatus(order.status)) return base;
-  if (order.status === 'cancelled' || order.status === 'returned') {
-    return Math.max(0, base - (Number(order.refundedAmount) || 0));
-  }
-  return 0;
+  return Math.max(0, base - (Number(order.refundedAmount) || 0));
 };
 
 /**

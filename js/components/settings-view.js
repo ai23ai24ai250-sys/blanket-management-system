@@ -99,6 +99,15 @@ window.renderSettingsView = function() {
           </form>
         </div>
 
+        <!-- Google Sheets Sync -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-4">
+          <h3 class="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+            <i data-lucide="table-2" class="w-5 h-5 text-brand-400"></i>
+            <span>المزامنة مع Google Sheets</span>
+          </h3>
+          <div id="gs-sync-panel"></div>
+        </div>
+
       </div>
 
     </div>
@@ -107,6 +116,15 @@ window.renderSettingsView = function() {
 
 window.setupSettingsEvents = function(container) {
   if (!window.isAdmin()) return;
+
+  const syncPanelEl = container.querySelector('#gs-sync-panel');
+  if (syncPanelEl && window.GoogleSheetsSync && typeof window.GoogleSheetsSync.renderSyncPanel === 'function') {
+    window.GoogleSheetsSync.renderSyncPanel(syncPanelEl, {
+      onSaved: (cfg) => window.showToast('تم حفظ إعدادات مزامنة Google Sheets بنجاح', 'success'),
+      onSynced: (cfg) => window.showToast('تمت المزامنة مع Google Sheets بنجاح', 'success'),
+      onError: (err) => window.showToast((err && err.message) || String(err), 'error')
+    });
+  }
 
   const form = container.querySelector('#form-firebase-config');
   const toggleBtn = container.querySelector('#btn-toggle-firebase-edit');

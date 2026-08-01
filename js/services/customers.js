@@ -94,11 +94,15 @@ window.recalculateCustomerBalance = function(customerId) {
 
   const totalPaid = totalDownPayments + totalDirectPayments;
   const remainingBalance = Math.max(0, totalPurchases - totalPaid);
+  const ordersCount = orders.length;
+  const lastOrderDate = orders.length ? orders.map(o => o.createdAt || o.updatedAt || '').filter(Boolean).sort().pop() : null;
 
   window.updateCustomer(customerId, {
     totalPurchases,
     paid: totalPaid,
-    remainingBalance
+    remainingBalance,
+    ordersCount,
+    lastOrderDate
   });
 };
 

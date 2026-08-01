@@ -23,6 +23,11 @@ window.renderDashboard = function() {
   const openOrdersCount = window.getOpenOrdersCount();
   const lowStockCount = (window.getLowStockProducts ? window.getLowStockProducts().length : 0);
 
+  // قيد الانتظار (pending / status 'new'): not confirmed sales yet — deposits already in treasury.
+  const pendingOrders = orders.filter(o => o.status === 'new');
+  const pendingCount = pendingOrders.length;
+  const pendingCollectedDeposits = pendingOrders.reduce((s, o) => s + (Number(o.downPayment) || 0), 0);
+
   const recentOrders = orders.slice(0, 5);
 
   return `
@@ -132,17 +137,40 @@ window.renderDashboard = function() {
       </div>
 
       <!-- V3.11: Shipping & Packaging Revenue (إيراد خدمات شحن ونقل) — separate line -->
-      <div class="bg-sky-950/30 border border-sky-800/40 rounded-2xl p-4 flex items-center justify-between gap-4">
+      <div class="bg-sky-950/30 border border-sky-800/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <div class="p-2.5 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/30">
             <i data-lucide="truck" class="w-5 h-5"></i>
           </div>
           <div>
             <span class="text-sm font-bold text-sky-300 block">إيراد خدمات شحن ونقل 🚚</span>
-            <span class="text-[11px] text-slate-500">من عربون الشحن/التغليف — بند منفصل لا يُحتسب ضمن مبيعات البضاعة ولا صافي ربح المنتجات</span>
+            <span class="text-[11px] text-slate-500">عربون الشحن/التغليف المحصَّل بجميع الحالات (شامل قيد الانتظار) — لا يُحتسب ضمن مبيعات البضاعة ولا صافي ربح المنتجات</span>
           </div>
         </div>
         <span class="text-xl font-extrabold text-sky-400 num-font">${window.formatCurrency(calc.shippingRevenueIncome || 0)}</span>
+      </div>
+
+      <!-- Pending Orders (قيد الانتظار): not confirmed sales yet, deposits already in treasury -->
+      <div class="bg-amber-950/25 border border-amber-800/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            <i data-lucide="clock" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <span class="text-sm font-bold text-amber-300 block">فواتير قيد الانتظار (غير مؤكدة البيع)</span>
+            <span class="text-[11px] text-slate-500">لم تُشحن بعد — لا تدخل في مبيعات البضاعة المؤكدة، والعربون المحصَّل منها يظهر فوراً في وارد الخزينة</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-8">
+          <div class="text-left">
+            <span class="text-[11px] text-slate-400 block">عدد الفواتير</span>
+            <span class="text-lg font-extrabold text-amber-300 num-font">${pendingCount}</span>
+          </div>
+          <div class="text-left">
+            <span class="text-[11px] text-slate-400 block">العربون المحصَّل</span>
+            <span class="text-lg font-extrabold text-emerald-400 num-font">${window.formatCurrency(pendingCollectedDeposits)}</span>
+          </div>
+        </div>
       </div>
 
       <!-- Quick Actions Grid -->
