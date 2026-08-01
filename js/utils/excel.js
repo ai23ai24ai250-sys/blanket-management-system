@@ -61,12 +61,14 @@ window.exportFullDatabaseToExcel = function() {
       'الهاتف الثانوي': o.customerSecondaryPhone || '',
       'تصنيف العميل': o.customerCategory || '',
       'نوع التنفيذ': o.directShipping ? 'شحن مباشر من المورد' : 'من المخزون',
+      'نوع العربون': o.depositType === 'shipping' ? 'عربون بقيمة الشحن' : o.depositType === 'shipping_extra' ? 'عربون الشحن + المصروفات' : 'عربون عادي',
+      'إيراد خدمات شحن ونقل (ج.م)': window.getOrderShippingRevenue ? window.getOrderShippingRevenue(o) : 0,
       'إجمالي الفاتورة (ج.م)': o.totalAmount,
       'المدفوع مقدماً (ج.م)': o.downPayment,
-      'عربون محتفظ به (إيراد)': o.status === 'cancelled' ? (Number(o.retainedDeposit) || 0) : 0,
-      'إرجاع عربون (خصم)': o.status === 'cancelled' ? (Number(o.refundedAmount) || 0) : 0,
+      'عربون محتفظ به (إيراد)': (o.status === 'cancelled' || o.status === 'returned') ? (Number(o.retainedDeposit) || 0) : 0,
+      'إرجاع عربون (خصم)': (o.status === 'cancelled' || o.status === 'returned') ? (Number(o.refundedAmount) || 0) : 0,
       'المتبقي (ج.م)': o.remainingBalance,
-      'حالة الطلب': o.status === 'delivered' ? 'تم التوصيل' : o.status === 'completed' ? 'مكتمل' : 'جديد',
+      'حالة الطلب': window.getOrderStatusLabel(o.status),
       'المسجل': o.createdBy || 'المدير العام',
       'التاريخ': window.formatDate(o.createdAt)
     }));

@@ -18,6 +18,15 @@ window.getUsers = function() {
   return (users && users.length > 0) ? users : INITIAL_USERS;
 };
 
+// 🔒 Null-safe email normalization: a user doc/record may be missing its email
+// (incomplete write, partial merge, legacy import). Sanitizing an undefined
+// email with .toLowerCase() crashes the whole login/relogin flow with
+// "Cannot read properties of undefined (reading 'toLowerCase')", so every email
+// comparison must go through this helper.
+function _normEmail(value) {
+  return ((value || '') + '').trim().toLowerCase();
+}
+
 window.getCurrentUser = function() {
   // The local session is the app's authoritative identity (set by login() only
   // after strict validation against active user accounts).
@@ -37,7 +46,7 @@ window.getCurrentUser = function() {
   if (window.auth && window.auth.currentUser) {
     const fbUser = window.auth.currentUser;
     const users = window.getUsers();
-    const matched = users.find(u => u.email.toLowerCase() === fbUser.email.toLowerCase());
+    const matched = users.find(u => _normEmail(u.email) === _normEmail(fbUser && fbUser.email));
     if (!matched) return null;
     return {
       email: fbUser.email,
@@ -49,26 +58,62 @@ window.getCurrentUser = function() {
   return null;
 };
 
-window.login = function(email, password) {
-  const cleanEmail = (email || '').trim().toLowerCase();
+window.login = async function(email, password) {
+  const cleanEmail = _normEmail(email);
   const cleanPassword = (password || '').trim();
 
   if (!cleanEmail || !cleanPassword) {
     throw new Error('يرجى إدخال البريد الإلكتروني وكلمة المرور');
   }
 
-  // STRICT local validation against active user accounts ONLY. A stale or
-  // deprecated email (e.g. the old email after an account email change) has no
-  // active account document and is rejected here regardless of Firebase Auth.
-  const usersList = window.getUsers();
-  const user = usersList.find(u => u.email.toLowerCase() === cleanEmail);
-  if (!user) {
-    throw new Error('حساب المستخدم غير موجود في النظام');
+  // 🔒 STRICT validation against active user accounts (null-safe email compare).
+  // On a fresh device the local users list may hold only the seed admin until
+  // the first cloud sync; a real Firebase Auth credential is then accepted and
+  // the session is minted from the cloud-synced record below.
+  let user = window.getUsers().find(u => _normEmail(u.email) === cleanEmail);
+
+  // Local password gate first: instant feedback, no cloud latency on typos.
+  if (user && user.password && user.password.trim() !== cleanPassword) {
+    throw new Error('كلمة المرور غير صحيحة');
   }
 
-  // For accounts with password set, require a matching password
-  if (user.password && user.password.trim() !== cleanPassword) {
-    throw new Error('كلمة المرور غير صحيحة');
+  if (window.auth) {
+    window._pendingAuth = true;
+    try {
+      // ✅ Await the real Firebase sign-in so onAuthStateChanged settles with a
+      //    non-null user BEFORE any render / route-guard runs. This removes the
+      //    relogin race (permission toasts + stale role/email sanitization) and
+      //    lets a real cloud credential mint a session even when the local
+      //    users list on THIS device hasn't synced yet (multi-device login).
+      await window.auth.signInWithEmailAndPassword(cleanEmail, cleanPassword);
+      if (window.waitForFirebaseAuth) await window.waitForFirebaseAuth();
+    } catch (err) {
+      // Offline / blocked cloud: keep the strict LOCAL validation result as the
+      // fallback (session still works, cloud sync is skipped until reconnect).
+      if (!user) {
+        throw new Error(err && err.message ? err.message : 'فشل تسجيل الدخول إلى السحابة');
+      }
+    } finally {
+      window._pendingAuth = false;
+    }
+
+    // 🛰️ CLOUD-FIRST: after successful authentication, pull Firestore as the
+    //    single source of truth so every device/browser converges to the exact
+    //    same data before the dashboard is rendered. A failed fetch never
+    //    blocks login — the local snapshot stays usable offline.
+    try {
+      window.startFirestoreSync();
+      await window.fetchAllFromFirestore(true);
+    } catch (e) { /* local snapshot remains authoritative offline */ }
+
+    // Re-resolve the account from the (now cloud-synced) users collection so a
+    // role/name changed on another device is honored immediately.
+    const synced = window.getUsers().find(u => _normEmail(u.email) === cleanEmail);
+    if (synced && synced.id) user = synced;
+  }
+
+  if (!user) {
+    throw new Error('حساب المستخدم غير موجود في النظام');
   }
 
   const sessionUser = {
@@ -81,16 +126,6 @@ window.login = function(email, password) {
 
   sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionUser));
 
-  // Sync Firebase Auth in the background (non-blocking) ONLY after local
-  // validation passed, so cloud sign-in can never mint a session for a
-  // stale/rejected credential.
-  if (window.auth) {
-    window.auth.signInWithEmailAndPassword(cleanEmail, cleanPassword)
-      .catch((error) => {
-        console.warn('Firebase Auth Cloud Sign-in note:', error.message);
-      });
-  }
-
   return sessionUser;
 };
 
@@ -98,6 +133,9 @@ window.logout = function() {
   if (window.auth) {
     window.auth.signOut().catch(err => console.error(err));
   }
+  // 🔒 Tear down every realtime Firestore listener the moment the session ends
+  // (idempotent: the auth gate also unsubscribes on the signOut() event).
+  if (window.stopFirestoreSync) window.stopFirestoreSync();
   sessionStorage.removeItem(AUTH_STORAGE_KEY);
   localStorage.removeItem(AUTH_STORAGE_KEY);
 };
@@ -126,7 +164,7 @@ window.verifyAdminPassword = function(enteredPassword) {
 
   const cleanInput = enteredPassword.trim();
   const usersList = window.getUsers();
-  const activeUserDoc = usersList.find(u => u.email.toLowerCase() === currentUser.email.toLowerCase());
+  const activeUserDoc = usersList.find(u => _normEmail(u.email) === _normEmail(currentUser.email));
 
   // Check against password stored in Firestore users document
   if (activeUserDoc && activeUserDoc.password && activeUserDoc.password.trim()) {
@@ -146,8 +184,8 @@ window.createNewUserAccount = function({ name, email, password, role }) {
     throw new Error('غير مصرح لك بإنشاء حسابات مستخدمين. هذه الصلاحية للمدير فقط');
   }
 
-  const cleanEmail = email.trim().toLowerCase();
-  const existing = window.getUsers().find(u => u.email.toLowerCase() === cleanEmail);
+  const cleanEmail = _normEmail(email);
+  const existing = window.getUsers().find(u => _normEmail(u.email) === cleanEmail);
   if (existing) {
     throw new Error('هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر');
   }
@@ -188,8 +226,7 @@ window.updateUserAccount = function(userId, { name, email, password, role }) {
   if (role && role !== 'admin') {
     const target = window.getUsers().find(u => u.id === userId);
     const currentSession = window.getCurrentUser();
-    if (target && target.email && currentSession && currentSession.email &&
-        target.email.toLowerCase() === currentSession.email.toLowerCase()) {
+    if (target && currentSession && _normEmail(target.email) === _normEmail(currentSession.email)) {
       throw new Error('لا يمكن تغيير صلاحية المدير العام الرئيسي');
     }
   }
@@ -202,12 +239,12 @@ window.updateUserAccount = function(userId, { name, email, password, role }) {
   // Validate & prepare the email change BEFORE writing anything so we never
   // leave a partial update when the new email collides with another account.
   if (email) {
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = _normEmail(email);
     const oldUser = window.getUsers().find(u => u.id === userId);
-    oldEmail = oldUser ? (oldUser.email || '').toLowerCase() : '';
+    oldEmail = oldUser ? _normEmail(oldUser.email) : '';
 
     if (cleanEmail !== oldEmail) {
-      const duplicate = window.getUsers().find(u => u.id !== userId && u.email.toLowerCase() === cleanEmail);
+      const duplicate = window.getUsers().find(u => u.id !== userId && _normEmail(u.email) === cleanEmail);
       if (duplicate) {
         throw new Error('هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر');
       }
@@ -223,15 +260,14 @@ window.updateUserAccount = function(userId, { name, email, password, role }) {
   if (changedEmail) {
     // 1. Remove any legacy/stale user documents still carrying the old email.
     window.getUsers().forEach(u => {
-      if (u.id !== userId && u.email.toLowerCase() === oldEmail) {
+      if (u.id !== userId && _normEmail(u.email) === oldEmail) {
         window.deleteFirestoreDoc(window.STORAGE_KEYS.USER, u.id);
       }
     });
 
     // 2. If the currently signed-in Firebase Auth account uses the old email,
     //    update it so Firebase Auth accepts ONLY the new email going forward.
-    if (window.auth && window.auth.currentUser && window.auth.currentUser.email &&
-        window.auth.currentUser.email.toLowerCase() === oldEmail) {
+    if (window.auth && window.auth.currentUser && _normEmail(window.auth.currentUser.email) === oldEmail) {
       window.auth.currentUser.updateEmail(payload.email).catch(err => {
         console.warn('Firebase Auth email sync note:', err && err.message);
       });
@@ -245,8 +281,8 @@ window.updateUserAccount = function(userId, { name, email, password, role }) {
   if (sessionRaw) {
     try {
       const sess = JSON.parse(sessionRaw);
-      const sessionEmail = ((sess && sess.email) || '').toLowerCase();
-      const targetEmail = (payload.email || oldEmail || '').toLowerCase();
+      const sessionEmail = _normEmail(sess && sess.email);
+      const targetEmail = _normEmail(payload.email || oldEmail || '');
       if (sess && sessionEmail && sessionEmail === targetEmail) {
         sess.id = userId;
         if (payload.name) sess.name = payload.name;
@@ -276,7 +312,7 @@ window.changeOwnPassword = function(currentPassword, newPassword) {
   }
 
   const usersList = window.getUsers();
-  const activeUser = usersList.find(u => u.email.toLowerCase() === (currentUser.email || '').toLowerCase());
+  const activeUser = usersList.find(u => _normEmail(u.email) === _normEmail(currentUser.email));
   if (!activeUser) {
     throw new Error('حساب المستخدم غير موجود في النظام');
   }
@@ -311,15 +347,14 @@ window.updateUserRole = function(userId, newRole) {
   if (newRole !== 'admin') {
     const target = window.getUsers().find(u => u.id === userId);
     const currentSession = window.getCurrentUser();
-    if (target && target.email && currentSession && currentSession.email &&
-        target.email.toLowerCase() === currentSession.email.toLowerCase()) {
+    if (target && currentSession && _normEmail(target.email) === _normEmail(currentSession.email)) {
       throw new Error('لا يمكن تغيير صلاحية المدير العام الرئيسي');
     }
   }
   window.updateFirestoreDoc(window.STORAGE_KEYS.USER, userId, { role: newRole });
 };
 
-window.deleteUserAccount = function(userId) {
+window.deleteUserAccount = async function(userId) {
   if (!window.isAdmin()) {
     throw new Error('غير مصرح لك بحذف الحسابات');
   }
@@ -330,9 +365,8 @@ window.deleteUserAccount = function(userId) {
   }
   const target = window.getUsers().find(u => u.id === userId);
   const currentSession = window.getCurrentUser();
-  if (target && target.email && currentSession && currentSession.email &&
-      target.email.toLowerCase() === currentSession.email.toLowerCase()) {
+  if (target && currentSession && _normEmail(target.email) === _normEmail(currentSession.email)) {
     throw new Error('لا يمكن حذف حسابك الحالي');
   }
-  window.deleteFirestoreDoc(window.STORAGE_KEYS.USER, userId);
+  return window.deleteFirestoreDoc(window.STORAGE_KEYS.USER, userId);
 };

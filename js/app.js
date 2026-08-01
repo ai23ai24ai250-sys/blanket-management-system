@@ -33,6 +33,13 @@ class BMSApp {
   }
 
   init() {
+    // ⚠️ File Protocol Guard: realtime cloud sync requires a hosted origin
+    // (https:// or a local web server). Opening index.html directly from disk
+    // (file://) can never reach Firestore — warn loudly, keep local mode usable.
+    if (window.location && window.location.protocol === 'file:') {
+      console.warn('[BMSApp] Opened via file:// protocol — realtime cloud sync will NOT work. Serve the app over https:// (e.g. GitHub Pages) or a local web server.');
+    }
+
     // 1. Synchronously Initialize & Pre-hydrate DB Storage
     if (window.initDB) window.initDB();
 
@@ -130,6 +137,9 @@ class BMSApp {
     // connection or blocked Firestore rules don't spam toasts). Never surfaced
     // on the public login screen — there sync is expected to be quiet anyway.
     window.addEventListener('bms-sync-error', (e) => {
+      // 🔒 Silence ALL sync toasts while the #login screen is visible.
+      const loginEl = document.getElementById('login-screen');
+      if (loginEl && !loginEl.classList.contains('hidden')) return;
       if (!window.isAuthenticated()) return;
       const now = Date.now();
       if (now - (window._lastSyncErrorToastAt || 0) > 30000) {
@@ -141,13 +151,16 @@ class BMSApp {
 
     // Login Form Submit
     if (this.loginForm) {
-      this.loginForm.onsubmit = (e) => {
+      this.loginForm.onsubmit = async (e) => {
         e.preventDefault();
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
 
         try {
-          window.login(email, password);
+          // ✅ login() is async now: it awaits Firebase Auth sign-in AND the
+          // cloud-first Firestore pull, so the dashboard only renders with the
+          // complete, cloud-synced user record (no relogin toLowerCase crash).
+          await window.login(email, password);
           window.showToast('تم تسجيل الدخول بنجاح', 'success');
           this.checkAuth();
         } catch (err) {
@@ -302,7 +315,7 @@ class BMSApp {
     if (!window.isAuthenticated()) return;
 
     const user = window.getCurrentUser();
-    const role = user ? user.role : 'employee';
+    const role = user ? (user.role || 'employee') : 'employee';
 
     // Strict RBAC Route Guards
     if (role === 'storekeeper' && viewName !== 'products') {
@@ -394,7 +407,7 @@ class BMSApp {
 
   wireDashboardEvents() {
     const user = window.getCurrentUser();
-    const role = user ? user.role : 'employee';
+    const role = user ? (user.role || 'employee') : 'employee';
 
     const btnNewOrder = this.mainContent.querySelector('#btn-action-new-order');
     if (btnNewOrder) {

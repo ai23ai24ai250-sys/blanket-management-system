@@ -111,8 +111,8 @@ window.updateProduct = function(id, data) {
   });
 };
 
-window.deleteProduct = function(id) {
-  window.deleteFirestoreDoc(window.STORAGE_KEYS.PRODUCTS, id);
+window.deleteProduct = async function(id) {
+  return window.deleteFirestoreDoc(window.STORAGE_KEYS.PRODUCTS, id);
 };
 
 /**

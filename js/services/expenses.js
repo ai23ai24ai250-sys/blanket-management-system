@@ -32,8 +32,8 @@ window.createExpense = function({ title, amount, category = 'عمومية', date
   return window.addFirestoreDoc(window.STORAGE_KEYS.EXPENSES, newExpense);
 };
 
-window.deleteExpense = function(id) {
-  window.deleteFirestoreDoc(window.STORAGE_KEYS.EXPENSES, id);
+window.deleteExpense = async function(id) {
+  return window.deleteFirestoreDoc(window.STORAGE_KEYS.EXPENSES, id);
 };
 
 window.getTotalExpenses = function() {

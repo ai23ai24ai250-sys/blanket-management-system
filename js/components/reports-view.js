@@ -174,7 +174,7 @@ function renderSalesReport(filteredOrders) {
       </div>
 
       <!-- Treasury & Daily Cash Flow Summary -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
           <span class="text-xs text-slate-400 font-bold block mb-1">إجمالي المقبوضات (وارد الخزينة)</span>
           <span class="text-lg font-extrabold text-emerald-400 num-font">${window.formatCurrency(totalInflow)}</span>
@@ -191,7 +191,12 @@ function renderSalesReport(filteredOrders) {
         <div class="p-4 bg-slate-850 rounded-xl border border-slate-800">
           <span class="text-xs text-slate-400 font-bold block mb-1">عربون محتفظ به (إيراد تشغيلي)</span>
           <span class="text-lg font-extrabold text-amber-400 num-font">${window.formatCurrency(retainedDepositIncome)}</span>
-          <span class="text-[10px] text-slate-500 block mt-1">أرابون الأوامر الملغاة المحتفظ به</span>
+          <span class="text-[10px] text-slate-500 block mt-1">عربون الملغي/المرتجع المحتفظ به عدا جزء الشحن المحجوز منفصلاً</span>
+        </div>
+        <div class="p-4 bg-sky-950/30 rounded-xl border border-sky-800/40">
+          <span class="text-xs text-sky-300 font-bold block mb-1">إيراد خدمات شحن ونقل 🚚</span>
+          <span class="text-lg font-extrabold text-sky-400 num-font">${window.formatCurrency(calc.shippingRevenueIncome || 0)}</span>
+          <span class="text-[10px] text-slate-500 block mt-1">من عربون الشحن/التغليف — بند منفصل لا يدخل في صافي ربح المنتجات</span>
         </div>
       </div>
 
@@ -230,6 +235,8 @@ function renderSalesReport(filteredOrders) {
                   ? '<span class="px-2.5 py-1 text-xs rounded-lg font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">مرتجع (تم إرجاع المخزون)</span>'
                   : o.status === 'cancelled'
                   ? '<span class="px-2.5 py-1 text-xs rounded-lg font-bold bg-slate-800 text-slate-400 border border-slate-700">ملغي</span>'
+                  : o.status === 'new'
+                  ? '<span class="px-2.5 py-1 text-xs rounded-lg font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">قيد الانتظار</span>'
                   : Number(o.remainingBalance) > 0
                   ? '<span class="px-2.5 py-1 text-xs rounded-lg font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">آجل غير مسدد</span>'
                   : '<span class="px-2.5 py-1 text-xs rounded-lg font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">مكتمل ومسدد</span>';
@@ -425,12 +432,12 @@ window.setupReportsEvents = function(container) {
       }
 
       bodyEl.querySelectorAll('.btn-delete-expense').forEach(b => {
-        b.onclick = () => {
+        b.onclick = async () => {
           const eId = b.getAttribute('data-expense-id');
           const eTitle = b.getAttribute('data-expense-title');
           if (confirm(`هل أنت تأكد من حذف المصروف "${eTitle}"؟`)) {
-            window.deleteExpense(eId);
-            window.showToast('تم حذف المصروف بنجاح', 'info');
+            const ok = await window.deleteExpense(eId);
+            if (ok) window.showToast('تم حذف المصروف بنجاح', 'info');
             bodyEl.innerHTML = renderExpensesReport();
             if (window.lucide) window.lucide.createIcons({ props: {}, nameAttr: 'data-lucide' });
           }

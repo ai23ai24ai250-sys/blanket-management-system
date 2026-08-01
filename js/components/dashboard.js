@@ -131,6 +131,20 @@ window.renderDashboard = function() {
 
       </div>
 
+      <!-- V3.11: Shipping & Packaging Revenue (إيراد خدمات شحن ونقل) — separate line -->
+      <div class="bg-sky-950/30 border border-sky-800/40 rounded-2xl p-4 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="p-2.5 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/30">
+            <i data-lucide="truck" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <span class="text-sm font-bold text-sky-300 block">إيراد خدمات شحن ونقل 🚚</span>
+            <span class="text-[11px] text-slate-500">من عربون الشحن/التغليف — بند منفصل لا يُحتسب ضمن مبيعات البضاعة ولا صافي ربح المنتجات</span>
+          </div>
+        </div>
+        <span class="text-xl font-extrabold text-sky-400 num-font">${window.formatCurrency(calc.shippingRevenueIncome || 0)}</span>
+      </div>
+
       <!-- Quick Actions Grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         
@@ -213,8 +227,8 @@ window.renderDashboard = function() {
                   <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
                   <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>
                   <td>
-                    <span class="px-2.5 py-1 text-xs rounded-lg font-bold ${o.status === 'delivered' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : o.status === 'returned' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-slate-800 text-slate-300'}">
-                      ${o.status === 'delivered' ? 'تم التوصيل' : o.status === 'returned' ? 'مرتجع' : o.status}
+                    <span class="px-2.5 py-1 text-xs rounded-lg font-bold ${o.status === 'delivered' || o.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : o.status === 'returned' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : o.status === 'cancelled' ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}">
+                      ${window.getOrderStatusLabel(o.status)}
                     </span>
                   </td>
                   <td class="text-xs text-slate-400">${window.formatDate(o.createdAt)}</td>

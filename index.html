@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>علاء الدين 🪄 نظام الإدارة اليومية الذكي</title>
+  <title>علاء الدين 🪔 نظام الإدارة اليومية الذكي</title>
   <link rel="icon" type="image/jpeg" href="2.jpg">
 
   <!-- Google Fonts: Tajawal & Cairo -->
@@ -56,9 +56,43 @@
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="css/styles.css?v=3.6">
+  <link rel="stylesheet" href="css/styles.css?v=3.11">
+
+  <!-- File Protocol Warning: realtime cloud sync requires a hosted environment -->
+  <script>
+    (function () {
+      function fileProtocolWarning() {
+        if (window.location.protocol !== 'file:') return;
+        var banner = document.getElementById('file-protocol-warning');
+        if (!banner) return;
+        banner.style.display = 'flex';
+        var closeBtn = document.getElementById('file-protocol-warning-close');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', function () {
+            banner.style.display = 'none';
+          });
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fileProtocolWarning);
+      } else {
+        fileProtocolWarning();
+      }
+    })();
+  </script>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen selection:bg-brand-500 selection:text-white flex flex-col">
+
+  <!-- File Protocol Warning Banner (shown only when opened via file://) -->
+  <div id="file-protocol-warning" style="display:none" class="fixed inset-x-0 top-0 z-[60] p-3 bg-amber-950/95 border-b border-amber-600/50 text-amber-100 text-sm font-semibold shadow-lg">
+    <div class="flex items-center justify-between gap-3 max-w-7xl mx-auto w-full">
+      <div class="flex items-center gap-2">
+        <i data-lucide="alert-triangle" class="w-5 h-5 shrink-0 text-amber-400"></i>
+        <span>⚠️ النظام يعمل الآن من ملف محلي (file://) — المزامنة السحابية اللحظية بين الأجهزة لن تعمل. يرجى تشغيل النظام عبر <b>https://</b> (مثل GitHub Pages) أو خادم ويب محلي لضمان تزامن البيانات.</span>
+      </div>
+      <button id="file-protocol-warning-close" class="shrink-0 px-2.5 py-1 rounded-lg bg-amber-800/60 hover:bg-amber-700 text-amber-100 text-xs font-bold">فهمت</button>
+    </div>
+  </div>
 
   <!-- Application Container -->
   <div id="app" class="flex flex-col min-h-screen">
@@ -71,9 +105,9 @@
         
         <div class="text-center mb-8 relative z-10">
           <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl overflow-hidden bg-slate-800/80 border border-brand-500/30 mb-4 shadow-lg shadow-brand-500/10">
-            <img src="2.jpg" alt="علاء الدين 🪄" class="w-full h-full object-contain">
+            <img src="2.jpg" alt="علاء الدين 🪔" class="w-full h-full object-contain">
           </div>
-          <h1 class="text-2xl font-bold text-white mb-2">علاء الدين 🪄</h1>
+          <h1 class="text-2xl font-bold text-white mb-2">علاء الدين 🪔</h1>
           <p class="text-sm text-slate-400">نظام الإدارة اليومية الذكي</p>
         </div>
 
@@ -121,10 +155,10 @@
         <!-- Brand Title & Home Link -->
         <a href="index.html" class="flex items-center gap-3 cursor-pointer group" data-nav="dashboard" title="الرجوع للشاشة الرئيسية">
           <div class="w-11 h-11 rounded-xl overflow-hidden bg-slate-800 border border-brand-500/30 flex items-center justify-center shadow-md shadow-brand-500/20 group-hover:scale-105 transition-all">
-            <img src="2.jpg" alt="علاء الدين 🪄" class="w-full h-full object-contain">
+            <img src="2.jpg" alt="علاء الدين 🪔" class="w-full h-full object-contain">
           </div>
           <div>
-            <h2 class="text-lg font-bold text-white leading-tight group-hover:text-brand-300 transition-all">علاء الدين 🪄</h2>
+            <h2 class="text-lg font-bold text-white leading-tight group-hover:text-brand-300 transition-all">علاء الدين 🪔</h2>
             <p class="text-xs text-brand-400 font-medium">للبطاطين والمفروشات</p>
           </div>
         </a>
@@ -218,10 +252,10 @@
         <div class="flex justify-between items-center border-b border-slate-800 pb-4">
           <a href="index.html" class="flex items-center gap-3 cursor-pointer" data-nav="dashboard">
             <div class="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 border border-brand-500/30 flex items-center justify-center">
-              <img src="2.jpg" alt="علاء الدين 🪄" class="w-full h-full object-contain">
+              <img src="2.jpg" alt="علاء الدين 🪔" class="w-full h-full object-contain">
             </div>
             <div>
-              <h3 class="font-bold text-white text-base">علاء الدين 🪄</h3>
+              <h3 class="font-bold text-white text-base">علاء الدين 🪔</h3>
               <p class="text-xs text-brand-400">للبطاطين والمفروشات</p>
             </div>
           </a>
@@ -296,43 +330,43 @@
 
     <!-- Footer -->
     <footer class="mt-auto border-t border-slate-800/80 bg-slate-950/60 py-4 text-center text-xs text-slate-500">
-      <span>علاء الدين 🪄 نظام الإدارة اليومية الذكي — جميع الحقوق محفوظة &copy; 2026</span>
+      <span>علاء الدين 🪔 نظام الإدارة اليومية الذكي — جميع الحقوق محفوظة &copy; 2026</span>
     </footer>
 
   </div>
 
   <!-- JavaScript Modules Inclusion -->
-  <script src="js/utils/formatters.js?v=3.6"></script>
-  <script src="js/utils/toast.js?v=3.6"></script>
-  <script src="js/utils/modal.js?v=3.6"></script>
-  <script src="js/utils/excel.js?v=3.6"></script>
-  <script src="js/utils/statements.js?v=3.6"></script>
+  <script src="js/utils/formatters.js?v=3.11"></script>
+  <script src="js/utils/toast.js?v=3.11"></script>
+  <script src="js/utils/modal.js?v=3.11"></script>
+  <script src="js/utils/excel.js?v=3.11"></script>
+  <script src="js/utils/statements.js?v=3.11"></script>
 
   <!-- Firebase Services & Data Store -->
-  <script src="js/firebase-config.js?v=3.6"></script>
-  <script src="js/services/db.js?v=3.6"></script>
+  <script src="js/firebase-config.js?v=3.11"></script>
+  <script src="js/services/db.js?v=3.11"></script>
 
-  <script src="js/auth.js?v=3.6"></script>
-  <script src="js/services/customers.js?v=3.6"></script>
-  <script src="js/services/suppliers.js?v=3.6"></script>
-  <script src="js/services/products.js?v=3.6"></script>
-  <script src="js/services/orders.js?v=3.6"></script>
-  <script src="js/services/payments.js?v=3.6"></script>
-  <script src="js/services/expenses.js?v=3.6"></script>
-  <script src="js/services/supplier-returns.js?v=3.6"></script>
+  <script src="js/auth.js?v=3.11"></script>
+  <script src="js/services/customers.js?v=3.11"></script>
+  <script src="js/services/suppliers.js?v=3.11"></script>
+  <script src="js/services/products.js?v=3.11"></script>
+  <script src="js/services/orders.js?v=3.11"></script>
+  <script src="js/services/payments.js?v=3.11"></script>
+  <script src="js/services/expenses.js?v=3.11"></script>
+  <script src="js/services/supplier-returns.js?v=3.11"></script>
 
-  <script src="js/components/dashboard.js?v=3.6"></script>
-  <script src="js/components/orders-view.js?v=3.6"></script>
-  <script src="js/components/customers-view.js?v=3.6"></script>
-  <script src="js/components/suppliers-view.js?v=3.6"></script>
-  <script src="js/components/products-view.js?v=3.6"></script>
-  <script src="js/components/payments-view.js?v=3.6"></script>
-  <script src="js/components/reports-view.js?v=3.6"></script>
-  <script src="js/components/users-view.js?v=3.6"></script>
-  <script src="js/components/settings-view.js?v=3.6"></script>
+  <script src="js/components/dashboard.js?v=3.11"></script>
+  <script src="js/components/orders-view.js?v=3.11"></script>
+  <script src="js/components/customers-view.js?v=3.11"></script>
+  <script src="js/components/suppliers-view.js?v=3.11"></script>
+  <script src="js/components/products-view.js?v=3.11"></script>
+  <script src="js/components/payments-view.js?v=3.11"></script>
+  <script src="js/components/reports-view.js?v=3.11"></script>
+  <script src="js/components/users-view.js?v=3.11"></script>
+  <script src="js/components/settings-view.js?v=3.11"></script>
 
-  <script src="js/components/orders-dialog.js?v=3.6"></script>
+  <script src="js/components/orders-dialog.js?v=3.11"></script>
 
-  <script src="js/app.js?v=3.6"></script>
+  <script src="js/app.js?v=3.11"></script>
 </body>
 </html>

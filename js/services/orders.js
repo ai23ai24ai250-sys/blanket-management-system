@@ -32,11 +32,11 @@ window.getOpenOrdersCount = function() {
 window.getTotalSalesAmount = function() {
   const orders = window.getOrders();
   return orders
-    .filter(o => o.status !== 'returned' && o.status !== 'cancelled')
+    .filter(o => window.isFulfilledOrderStatus(o.status))
     .reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
 };
 
-window.createOrder = function({ customerInfo, items, downPayment = 0, shippingCost = 0, shippingPayer = 'customer', extraExpenses = 0, extraExpensesPayer = 'customer', status = 'delivered', createdBy = 'المدير العام', directShipping = false }) {
+window.createOrder = function({ customerInfo, items, downPayment = 0, shippingCost = 0, shippingPayer = 'customer', extraExpenses = 0, extraExpensesPayer = 'customer', status = 'delivered', createdBy = 'المدير العام', directShipping = false, depositType = 'custom' }) {
   const phoneValidation = window.validateEgyptianPhone(customerInfo.phone);
   if (!phoneValidation.isValid) {
     throw new Error(phoneValidation.message);
@@ -102,6 +102,11 @@ window.createOrder = function({ customerInfo, items, downPayment = 0, shippingCo
   const remainingBalance = Math.max(0, totalAmount - dp);
   const paidInFull = (dp === totalAmount);
 
+  // V3.11: The portion of the deposit designated to shipping/packaging services
+  // (depositType 'shipping' / 'shipping_extra') is booked to the separate
+  // "إيراد خدمات شحن ونقل" account — never to merchandise sales or product profit.
+  const shippingRevenueDeposit = window.computeShippingRevenueDeposit(depositType, dp, shipCost, exExpenses, shippingPayer, extraExpensesPayer);
+
   const orderId = window.generateAutoId('ORD');
   const now = new Date().toISOString();
 
@@ -123,6 +128,8 @@ window.createOrder = function({ customerInfo, items, downPayment = 0, shippingCo
     remainingBalance,
     paidInFull,
     status,
+    depositType: depositType || 'custom',
+    shippingRevenueDeposit,
     directShipping: !!directShipping,
     createdBy,
     createdAt: now,
@@ -187,7 +194,12 @@ window.applyOrderFulfillment = function(order) {
       const supplierName = item.supplierName || '';
       item.consumed = 0;
 
-      if (supplierId && costPerUnit > 0 && qty > 0) {
+      // V3.10: A RETURNED direct-shipping order KEEPS its original supplier debt
+      // (the returned goods became store stock), so reactivating it must NOT
+      // record a second شحنة توريد — the supplier was already charged once.
+      const alreadyRecorded = Array.isArray(order.supplierShipments) && order.supplierShipments.length > 0;
+
+      if (!alreadyRecorded && supplierId && costPerUnit > 0 && qty > 0) {
         const totalShipmentCost = qty * costPerUnit;
         const supplier = window.getSupplierById(supplierId);
         if (supplier) {
@@ -302,7 +314,7 @@ window.applyOrderFulfillment = function(order) {
  *   refundAmount                                  → logged as an outgoing refund_deposit
  *     treasury payment (reduces cash flow & net revenue).
  */
-function handleDepositRefund(order, refundAmount) {
+function handleDepositRefund(order, refundAmount, note) {
   const deposit = Number(order.downPayment) || 0;
   if (deposit <= 0) return;
 
@@ -333,7 +345,7 @@ function handleDepositRefund(order, refundAmount) {
       amount: -refundAmt,
       date: new Date().toISOString().split('T')[0],
       paymentMethod: 'cash',
-      notes: `إرجاع عربون للعميل عن الطلب الملغي رقم ${order.id}`,
+      notes: note || `إرجاع عربون للعميل عن الطلب الملغي رقم ${order.id}`,
       createdBy: 'المدير العام'
     });
   }
@@ -397,8 +409,19 @@ window.updateOrderStatus = function(orderId, newStatus, refundAmount) {
     // Re-add product quantities back into inventory stock.
     // Restore exactly the physically-consumed units (recorded at fulfillment time);
     // fall back to the full order quantity for legacy orders created before this was tracked.
-    // Direct-shipping orders never touched the warehouse, so nothing is restored.
-    if (!currentOrder.directShipping) {
+    // V3.10: RETURNED goods physically come back to the store warehouse, so the
+    // FULL shipped quantity is restored — including direct-shipping orders (the
+    // customer sent the goods back). CANCELLED orders never shipped, so only the
+    // units actually consumed from warehouse stock are restored (direct orders,
+    // which never touched the warehouse, restore nothing).
+    if (newStatus === 'returned') {
+      currentOrder.items.forEach(item => {
+        const restoreQty = currentOrder.directShipping
+          ? (Number(item.quantity) || 0)
+          : (typeof item.consumed === 'number' && item.consumed >= 0 ? item.consumed : (Number(item.quantity) || 0));
+        window.incrementProductStock(item.productId, restoreQty);
+      });
+    } else if (!currentOrder.directShipping) {
       currentOrder.items.forEach(item => {
         const consumed = typeof item.consumed === 'number' && item.consumed >= 0 ? item.consumed : (Number(item.quantity) || 0);
         window.incrementProductStock(item.productId, consumed);
@@ -428,28 +451,34 @@ window.updateOrderStatus = function(orderId, newStatus, refundAmount) {
       }
     });
 
-    // Reverse the direct-supply shipments recorded at fulfillment time
-    (currentOrder.supplierShipments || []).forEach(d => {
-      const supplier = window.getSupplierById(d.supplierId);
-      if (supplier) {
-        window.updateSupplier(d.supplierId, {
-          totalPurchases: Math.max(0, (Number(supplier.totalPurchases) || 0) - Number(d.amount)),
-          remainingBalance: Math.max(0, (Number(supplier.remainingBalance) || 0) - Number(d.amount))
-        });
-
-        if (window.logSupplierTransaction) {
-          window.logSupplierTransaction({
-            supplierId: d.supplierId,
-            supplierName: supplier.name,
-            type: 'إلغاء شحنة توريد مباشر',
-            refId: currentOrder.id,
-            credit: Number(d.amount) || 0,
-            note: `إلغاء شحنة التوريد المباشر للطلب ${currentOrder.id} (${d.productName} x${d.units}) بعد الإرجاع/الإلغاء`,
-            date: new Date().toISOString()
+    // Reverse the direct-supply shipments ONLY for CANCELLED orders.
+    // V3.10: A RETURNED direct-shipping order KEEPS its supplier debt — the goods
+    // physically came back to the store warehouse, so the store still owes the
+    // supplier for them (treated as purchased stock). Only cancellation
+    // (pre-shipping) voids the supplier debt entirely.
+    if (newStatus === 'cancelled') {
+      (currentOrder.supplierShipments || []).forEach(d => {
+        const supplier = window.getSupplierById(d.supplierId);
+        if (supplier) {
+          window.updateSupplier(d.supplierId, {
+            totalPurchases: Math.max(0, (Number(supplier.totalPurchases) || 0) - Number(d.amount)),
+            remainingBalance: Math.max(0, (Number(supplier.remainingBalance) || 0) - Number(d.amount))
           });
+
+          if (window.logSupplierTransaction) {
+            window.logSupplierTransaction({
+              supplierId: d.supplierId,
+              supplierName: supplier.name,
+              type: 'إلغاء شحنة توريد مباشر',
+              refId: currentOrder.id,
+              credit: Number(d.amount) || 0,
+              note: `إلغاء شحنة التوريد المباشر للطلب ${currentOrder.id} (${d.productName} x${d.units}) بعد الإرجاع/الإلغاء`,
+              date: new Date().toISOString()
+            });
+          }
         }
-      }
-    });
+      });
+    }
 
     // Revert customer debt balance
     const customer = window.getCustomerById(currentOrder.customerId);
@@ -471,21 +500,29 @@ window.updateOrderStatus = function(orderId, newStatus, refundAmount) {
         // persists refundedAmount/retainedDeposit on the order for reports.
         handleDepositRefund(currentOrder, refundAmount);
       } else {
-        // RETURNED → legacy behavior: auto-refund all the money the customer paid
-        // toward this order (total customer payments minus what they still owe).
-        const newOwed = Math.max(0, updatedPurchases - updatedBalance);
-        const autoRefund = Math.max(0, oldPaid - newOwed);
-        if (autoRefund > 0) {
-          window.createPaymentRecord({
-            entityType: 'customer',
-            entityId: currentOrder.customerId,
-            entityName: currentOrder.customerName,
-            amount: -autoRefund,
-            date: new Date().toISOString().split('T')[0],
-            paymentMethod: 'cash',
-            notes: `رد مبلغ مسدد / تسوية مرتجع للطلب رقم ${currentOrder.id}`,
-            createdBy: 'المدير العام'
-          });
+        // RETURNED → by default refund ALL the money the customer paid toward
+        // this order (legacy behavior: goods came back, so the payment is
+        // reversed). When the admin explicitly picked a (partial) refund amount
+        // from the update-status modal, honor exactly that amount instead and
+        // persist refundedAmount/retainedDeposit like cancellation does.
+        const explicitRefund = (Number(refundAmount) || 0) > 0;
+        if (explicitRefund) {
+          handleDepositRefund(currentOrder, refundAmount, `رد مبلغ مسدد / تسوية مرتجع للطلب رقم ${currentOrder.id}`);
+        } else {
+          const newOwed = Math.max(0, updatedPurchases - updatedBalance);
+          const autoRefund = Math.max(0, oldPaid - newOwed);
+          if (autoRefund > 0) {
+            window.createPaymentRecord({
+              entityType: 'customer',
+              entityId: currentOrder.customerId,
+              entityName: currentOrder.customerName,
+              amount: -autoRefund,
+              date: new Date().toISOString().split('T')[0],
+              paymentMethod: 'cash',
+              notes: `رد مبلغ مسدد / تسوية مرتجع للطلب رقم ${currentOrder.id}`,
+              createdBy: 'المدير العام'
+            });
+          }
         }
       }
     }

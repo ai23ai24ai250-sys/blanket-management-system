@@ -44,6 +44,7 @@ window.renderOrdersView = function() {
                 <th>المقدم</th>
                 <th>المتبقي</th>
                 <th>الشحن</th>
+                <th>نوع العربون</th>
                 <th>حالة الطلب</th>
                 <th>التاريخ</th>
                 <th>الإجراءات والعمليات</th>
@@ -64,13 +65,18 @@ function renderOrdersTableRows(ordersList) {
   if (!ordersList || ordersList.length === 0) {
     return `
       <tr>
-        <td colspan="10" class="text-center py-8 text-slate-500">لا توجد طلبات مسجلة المطابقة للبحث</td>
+        <td colspan="11" class="text-center py-8 text-slate-500">لا توجد طلبات مسجلة المطابقة للبحث</td>
       </tr>
     `;
   }
 
   return ordersList.map(o => {
     const statusBadge = window.getOrderStatusBadge(o.status);
+    const depositTypeBadge = o.depositType === 'shipping'
+      ? '<span class="px-2 py-1 text-xs rounded-lg font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">عربون الشحن</span>'
+      : o.depositType === 'shipping_extra'
+      ? '<span class="px-2 py-1 text-xs rounded-lg font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">عربون شحن + مصروفات</span>'
+      : '<span class="px-2 py-1 text-xs rounded-lg font-bold bg-slate-800 text-slate-400 border border-slate-700">عربون عادي</span>';
 
     return `
       <tr>
@@ -81,6 +87,7 @@ function renderOrdersTableRows(ordersList) {
         <td class="num-font text-emerald-400">${window.formatCurrency(o.downPayment)}</td>
         <td class="num-font font-bold ${Number(o.remainingBalance) > 0 ? 'text-rose-400' : 'text-slate-400'}">${window.formatCurrency(o.remainingBalance)}</td>
         <td class="text-xs text-slate-300">${o.shippingCost ? window.formatCurrency(o.shippingCost) + ' (' + (o.shippingPayer === 'customer' ? 'عميل' : 'تاجر') + ')' : '—'}</td>
+        <td>${depositTypeBadge}</td>
         <td>${statusBadge}</td>
         <td class="text-xs text-slate-400">${window.formatDate(o.createdAt)}</td>
         <td>
@@ -210,6 +217,18 @@ window.openOrderDetailsModal = function(orderId) {
         ${order.extraExpenses ? `<div class="flex justify-between text-slate-400"><span>مصروفات إضافية (${order.extraExpensesPayer === 'merchant' ? 'على التاجر' : 'على العميل'}):</span><span class="font-bold text-amber-400 num-font">${window.formatCurrency(order.extraExpenses)}</span></div>` : ''}
         <div class="flex justify-between text-slate-300 font-bold border-t border-slate-800 pt-1"><span>إجمالي الفاتورة:</span><span class="font-bold text-white num-font text-sm">${window.formatCurrency(order.totalAmount)}</span></div>
         <div class="flex justify-between text-slate-400"><span>المسدد مقدماً:</span><span class="font-bold text-emerald-400 num-font">${window.formatCurrency(order.downPayment)}</span></div>
+        ${order.depositType && order.depositType !== 'custom' ? `
+          <div class="flex justify-between text-slate-400">
+            <span>نوع العربون:</span>
+            <span class="font-bold text-sky-400">${order.depositType === 'shipping' ? 'عربون بقيمة الشحن' : 'عربون الشحن + المصروفات الإضافية'}</span>
+          </div>
+        ` : ''}
+        ${window.getOrderShippingRevenue(order) > 0 ? `
+          <div class="flex justify-between text-slate-500">
+            <span>إيراد خدمات شحن ونقل (من العربون):</span>
+            <span class="font-bold text-sky-400 num-font">${window.formatCurrency(window.getOrderShippingRevenue(order))}</span>
+          </div>
+        ` : ''}
         <div class="flex justify-between text-slate-200 font-bold border-t border-slate-800 pt-1"><span>المتبقي الآجل:</span><span class="font-extrabold text-rose-400 num-font text-sm">${window.formatCurrency(order.remainingBalance)}</span></div>
         <div class="border-t border-slate-800 mt-2 pt-2 space-y-1">
           <span class="text-xs font-bold text-slate-300 block mb-1">🧮 التحليل المالي للفاتورة:</span>
@@ -269,14 +288,14 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
         <select id="select-new-order-status" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold text-xs">
           <option value="delivered" ${currentStatus === 'delivered' ? 'selected' : ''}>تم التوصيل (خصم الكميات من المخزن)</option>
           <option value="completed" ${currentStatus === 'completed' ? 'selected' : ''}>مكتمل نهائي (تسليم وتم تحصيل الحساب كامل بالكامل)</option>
-          <option value="returned" ${currentStatus === 'returned' ? 'selected' : ''}>مرتجع (إعادة البضاعة للمخزن وتسوية حساب العميل)</option>
-          <option value="cancelled" ${currentStatus === 'cancelled' ? 'selected' : ''}>ملغي (إلغاء الطلب بالكامل)</option>
+          <option value="returned" ${currentStatus === 'returned' ? 'selected' : ''}>مرتجع (بعد الشحن: إعادة البضاعة للمخزن وخصم تكاليف الشحن الفعلية)</option>
+          <option value="cancelled" ${currentStatus === 'cancelled' ? 'selected' : ''}>ملغي (قبل الشحن: إلغاء الطلب بالكامل بلا تكاليف شحن)</option>
         </select>
       </div>
 
       <div class="p-3 bg-amber-950/30 rounded-xl border border-amber-800/40 text-xs text-amber-300">
         ℹ️ تنبيه: اختيار "مرتجع" أو "ملغي" سيقوم آلياً بإعادة المنتجات لحساب المخزون، إلغاء مديونية الفاتورة من حساب العميل، وإلغاء مديونية عجز المخزون المسجلة على المورد.
-        <p class="mt-1.5 text-amber-200/90">💡 ملاحظة: إلغاء الطلب يُبقي العربون المدفوع محتفظاً به كإيراد تشغيلي (شحن/تجهيز) افتراضياً، مع إمكانية استرداد كامل أو جزء منه للعميل من الخيارات التالية.</p>
+        <p class="mt-1.5 text-amber-200/90">💡 ملاحظة: "ملغي" يُستخدم قبل الشحن فلا تُخصم أي تكاليف شحن، ويُبقي العربون المدفوع محتفظاً به كإيراد تشغيلي افتراضياً مع إمكانية استرداد كامل أو جزء منه. أما "مرتجع" فيُستخدم بعد محاولة الشحن وتُخصم تكاليف الشحن الفعلية، ويُرجع المسدد للعميل افتراضياً مع إمكانية تحديد مبلغ استرداد جزئي من الخيارات التالية. في الحالتين يُسجَّل قيد الاسترداد في الخزينة وتُعاد المنتجات للمخزون وتُلغى مديونية الفاتورة.</p>
       </div>
 
       ${deposit > 0 ? `
@@ -315,7 +334,9 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
 
       const refreshRefundVisibility = () => {
         if (refundSection) {
-          const showRefund = statusSelect.value === 'cancelled';
+          // Refund deposit is available for BOTH "ملغي" (cancelled) and "مرتجع"
+          // (returned): the admin may refund all or part of the customer's deposit.
+          const showRefund = statusSelect.value === 'cancelled' || statusSelect.value === 'returned';
           refundSection.classList.toggle('hidden', !showRefund);
           if (!showRefund && refundCheckbox) {
             refundCheckbox.checked = false;
@@ -345,9 +366,10 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
         e.preventDefault();
         const newStatus = statusSelect.value;
 
-        // V3.4: Flexible deposit refund on cancellation — validate 1..downPayment.
+        // V3.4/V3.9: Flexible deposit refund — available for BOTH cancellation
+        // (ملغي) and return (مرتجع). Validate refund amount within 1..downPayment.
         let refundAmount = 0;
-        if (newStatus === 'cancelled' && refundCheckbox && refundCheckbox.checked && deposit > 0) {
+        if ((newStatus === 'cancelled' || newStatus === 'returned') && refundCheckbox && refundCheckbox.checked && deposit > 0) {
           refundAmount = parseFloat(refundInput.value) || 0;
           if (refundAmount < 1 || refundAmount > deposit) {
             window.showToast(`المبلغ المسترد يجب أن يكون من 1 حتى ${window.formatCurrency(deposit)}`, 'error');
@@ -358,9 +380,11 @@ window.openOrderStatusModal = function(orderId, currentStatus, refreshParentFn) 
         try {
           window.updateOrderStatus(orderId, newStatus, refundAmount);
           const toastMsg = refundAmount > 0
-            ? `تم إلغاء الطلب ${orderId} واسترداد ${window.formatCurrency(refundAmount)} من العربون للعميل`
+            ? (newStatus === 'cancelled'
+                ? `تم إلغاء الطلب ${orderId} واسترداد ${window.formatCurrency(refundAmount)} من العربون للعميل`
+                : `تم إرجاع الطلب ${orderId} واسترداد ${window.formatCurrency(refundAmount)} من العربون للعميل`)
             : `تم تحديث حالة الفاتورة رقم ${orderId} إلى (${newStatus}) بنجاح`;
-          window.showToast(toastMsg, refundAmount > 0 ? 'success' : 'success');
+          window.showToast(toastMsg, 'success');
           closeModal();
           if (refreshParentFn) refreshParentFn();
           else if (window.appInstance) window.appInstance.navigateTo('orders');

@@ -163,14 +163,14 @@ window.setupProductsEvents = function(container, refreshFn) {
     });
 
     container.querySelectorAll('.btn-delete-product').forEach(btn => {
-      btn.onclick = (e) => {
+      btn.onclick = async (e) => {
         e.stopPropagation();
         const pId = btn.getAttribute('data-product-id');
         const pName = btn.getAttribute('data-product-name');
         
         if (confirm(`هل أنت تأكد من رغبتك في حذف المنتج "${pName}" من المخزون؟`)) {
-          window.deleteProduct(pId);
-          window.showToast(`تم حذف المنتج "${pName}" بنجاح`, 'info');
+          const ok = await window.deleteProduct(pId);
+          if (ok) window.showToast(`تم حذف المنتج "${pName}" بنجاح`, 'info');
           if (refreshFn) refreshFn();
           else if (window.appInstance) window.appInstance.navigateTo('products');
         }

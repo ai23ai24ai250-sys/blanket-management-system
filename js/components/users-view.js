@@ -114,12 +114,16 @@ window.setupUsersEvents = function(container, refreshFn) {
 
   // Delete User Events
   container.querySelectorAll('.btn-delete-user').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = async () => {
       const uId = btn.getAttribute('data-user-id');
       const uName = btn.getAttribute('data-user-name');
       if (confirm(`هل أنت تأكد من إزالة حساب الموظف "${uName}" نهائياً من النظام؟`)) {
-        window.deleteUserAccount(uId);
-        window.showToast(`تم إزالة حساب "${uName}" بنجاح`, 'info');
+        try {
+          const ok = await window.deleteUserAccount(uId);
+          if (ok) window.showToast(`تم إزالة حساب "${uName}" بنجاح`, 'info');
+        } catch (err) {
+          window.showToast(err.message, 'error');
+        }
         if (refreshFn) refreshFn();
       }
     };
@@ -190,8 +194,8 @@ function openAddUserModal(refreshParentFn) {
 function openEditUserModal(user, refreshParentFn) {
   const currentUser = window.getCurrentUser();
   const isMainAdmin = user.id === 'USR-1001' ||
-    (currentUser && currentUser.email && user.email &&
-     currentUser.email.toLowerCase() === user.email.toLowerCase());
+    (currentUser && user.email &&
+     ((currentUser.email || '')).toLowerCase() === ((user.email || '')).toLowerCase());
 
   const roleFieldHTML = isMainAdmin
     ? `
@@ -263,7 +267,7 @@ function openEditUserModal(user, refreshParentFn) {
           const isSelf = currentSession && (
             (user.id && currentSession.id && user.id === currentSession.id) ||
             (currentSession.email && user.email &&
-             currentSession.email.toLowerCase() === user.email.toLowerCase())
+             ((currentSession.email || '')).toLowerCase() === ((user.email || '')).toLowerCase())
           );
           if (isSelf && window.appInstance && typeof window.appInstance.updateUserUI === 'function') {
             window.appInstance.updateUserUI();

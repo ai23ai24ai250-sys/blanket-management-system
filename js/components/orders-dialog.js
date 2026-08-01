@@ -211,6 +211,24 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
         </div>
       </div>
 
+      <!-- V3.11: Deposit Type (نوع العربون) — shipping deposits are booked to the
+           separate "إيراد خدمات شحن ونقل" account, outside merchandise sales/profit -->
+      <div class="bg-slate-950/40 p-4 rounded-xl border border-slate-800 space-y-2">
+        <div class="flex items-center justify-between">
+          <label class="block text-xs font-bold text-slate-300 flex items-center gap-1.5">
+            <i data-lucide="coins" class="w-4 h-4 text-sky-400"></i>
+            نوع العربون (الدفعة المقدمة)
+          </label>
+          <span class="text-[10px] font-bold text-sky-400/80 bg-sky-500/10 px-2 py-1 rounded-lg border border-sky-500/20">إيراد خدمات شحن ونقل منفصل</span>
+        </div>
+        <select id="order-deposit-type" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold text-xs transition-all cursor-pointer">
+          <option value="custom" selected>عربون عادي — تحدد المبلغ يدوياً (دفعة مقدمة عامة)</option>
+          <option value="shipping">عربون بقيمة الشحن — تُعبأ الدفعة تلقائياً = تكلفة الشحن</option>
+          <option value="shipping_extra">عربون الشحن + المصروفات الإضافية — تُعبأ تلقائياً = الشحن + التغليف</option>
+        </select>
+        <p id="deposit-type-hint" class="text-[11px] font-bold text-sky-400 mt-1 hidden"></p>
+      </div>
+
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-950/40 p-4 rounded-xl border border-slate-800">
         <div>
           <label class="block text-xs font-bold text-slate-300 mb-1.5">الدفعة المقدمة (اختياري)</label>
@@ -283,6 +301,8 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
       const extraExpensesPayerSelect = modalEl.querySelector('#order-extra-expenses-payer');
 
       const downPaymentInput = modalEl.querySelector('#order-down-payment');
+      const depositTypeSelect = modalEl.querySelector('#order-deposit-type');
+      const depositTypeHint = modalEl.querySelector('#deposit-type-hint');
       const statusSelect = modalEl.querySelector('#order-status-select');
       const submitBtn = modalEl.querySelector('#btn-submit-order');
       const dpValidationMsg = modalEl.querySelector('#dp-validation-msg');
@@ -325,6 +345,28 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
           badgeEl.classList.add('hidden');
         }
       });
+
+      // V3.11 — Deposit-type auto-fill & explanatory hint
+      const updateDepositTypeHint = () => {
+        const v = depositTypeSelect ? depositTypeSelect.value : 'custom';
+        if (v === 'shipping') {
+          depositTypeHint.textContent = 'سيُعبَّأ حقل الدفعة المقدمة تلقائياً بقيمة تكلفة الشحن، ويُسجَّل الجزء الخاص بالشحن في حساب «إيراد خدمات شحن ونقل» منفصلاً عن مبيعات البضاعة وصافي ربح المنتجات.';
+        } else if (v === 'shipping_extra') {
+          depositTypeHint.textContent = 'سيُعبَّأ حقل الدفعة المقدمة تلقائياً بقيمة الشحن + المصروفات الإضافية، ويُسجَّل جزآ الشحن والتغليف في حساب «إيراد خدمات شحن ونقل» منفصلاً عن مبيعات البضاعة وصافي ربح المنتجات.';
+        } else {
+          depositTypeHint.textContent = '';
+        }
+        if (depositTypeHint) depositTypeHint.classList.toggle('hidden', v === 'custom');
+      };
+
+      const syncDepositAutoFill = () => {
+        if (!depositTypeSelect || !downPaymentInput) return;
+        const v = depositTypeSelect.value;
+        if (v === 'custom') return;
+        const shipCost = Number(shippingCostInput.value) || 0;
+        const exExp = Number(extraExpensesInput.value) || 0;
+        downPaymentInput.value = v === 'shipping' ? shipCost : (shipCost + exExp);
+      };
 
       const updateCalculations = () => {
         let itemsSubtotal = 0;
@@ -490,6 +532,7 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
       };
 
       attachRowListeners();
+      updateDepositTypeHint();
       updateCalculations();
 
       if (directShippingCheckbox) {
@@ -498,10 +541,17 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
 
       downPaymentInput.addEventListener('input', updateCalculations);
       statusSelect.addEventListener('change', updateCalculations);
-      shippingCostInput.addEventListener('input', updateCalculations);
+      shippingCostInput.addEventListener('input', () => { syncDepositAutoFill(); updateCalculations(); });
       shippingPayerSelect.addEventListener('change', updateCalculations);
-      extraExpensesInput.addEventListener('input', updateCalculations);
+      extraExpensesInput.addEventListener('input', () => { syncDepositAutoFill(); updateCalculations(); });
       extraExpensesPayerSelect.addEventListener('change', updateCalculations);
+      if (depositTypeSelect) {
+        depositTypeSelect.addEventListener('change', () => {
+          updateDepositTypeHint();
+          syncDepositAutoFill();
+          updateCalculations();
+        });
+      }
 
       modalEl.querySelector('#btn-add-product-row').onclick = () => {
         lineItems.push({
@@ -611,7 +661,8 @@ window.openNewOrderModal = function(onSuccessCallback = null) {
             extraExpenses: exExpenses,
             extraExpensesPayer: extraExpensesPayer,
             status: statusSelect.value,
-            directShipping
+            directShipping,
+            depositType: depositTypeSelect ? depositTypeSelect.value : 'custom'
           });
 
           window.showToast(`تم حفظ وتأكيد الطلب رقم ${newOrder.id} بنجاح`, 'success');
