@@ -1,0 +1,88 @@
+/**
+ * Supplier Service Module - Cloud Firestore Connected
+ */
+
+window.getSuppliers = function() {
+  return window.getCollection(window.STORAGE_KEYS.SUPPLIERS);
+};
+
+window.searchSuppliers = function(query) {
+  const suppliers = window.getSuppliers();
+  if (!query) return suppliers;
+  const q = query.trim().toLowerCase();
+  return suppliers.filter(s => 
+    (s.name && s.name.toLowerCase().includes(q)) ||
+    (s.phone && s.phone.includes(q)) ||
+    (s.secondaryPhone && s.secondaryPhone.includes(q)) ||
+    (s.id && s.id.toLowerCase().includes(q))
+  );
+};
+
+window.getSupplierById = function(id) {
+  const suppliers = window.getSuppliers();
+  return suppliers.find(s => s.id === id) || null;
+};
+
+window.findSupplierByPhone = function(phone, excludeId = '') {
+  if (!phone) return null;
+  const normalized = window.normalizePhone(phone);
+  if (!normalized) return null;
+  const suppliers = window.getSuppliers();
+  return suppliers.find(s => {
+    if (s.id === excludeId) return false;
+    const primary = s.phone ? window.normalizePhone(s.phone) : '';
+    const secondary = s.secondaryPhone ? window.normalizePhone(s.secondaryPhone) : '';
+    return (primary && primary === normalized) || (secondary && secondary === normalized);
+  }) || null;
+};
+
+// V3.21 — Supplier phone uniqueness across BOTH primary & secondary numbers.
+// Throws the user-facing toast message including the conflicting supplier name.
+function assertSupplierPhoneUnique(phone, secondaryPhone, excludeId) {
+  const conflict = (phone ? window.findSupplierByPhone(phone, excludeId) : null)
+    || (secondaryPhone ? window.findSupplierByPhone(secondaryPhone, excludeId) : null);
+  if (conflict) {
+    throw new Error('رقم الهاتف هذا مسجل بالفعل لمورد آخر (' + conflict.name + ')');
+  }
+}
+
+window.createSupplier = function(data) {
+  const phone = (data.phone || '').trim();
+  const secondaryPhone = (data.secondaryPhone || '').trim();
+  assertSupplierPhoneUnique(phone, secondaryPhone, '');
+  if (secondaryPhone && secondaryPhone === phone) {
+    throw new Error('رقم الهاتف الثانوي لا يمكن أن يطابق الرقم الرئيسي');
+  }
+
+  const newSupplier = {
+    id: window.generateAutoId('SUP'),
+    name: data.name.trim(),
+    phone,
+    secondaryPhone,
+    address: (data.address || '').trim(),
+    notes: (data.notes || '').trim(),
+    totalPurchases: window.round2(Number(data.totalPurchases) || 0),
+    paid: window.round2(Number(data.paid) || 0),
+    remainingBalance: window.round2((Number(data.totalPurchases) || 0) - (Number(data.paid) || 0)),
+    createdAt: getCairoFormattedDate(),
+    updatedAt: getCairoFormattedDate()
+  };
+
+  return window.addFirestoreDoc(window.STORAGE_KEYS.SUPPLIERS, newSupplier);
+};
+
+window.updateSupplier = function(id, updatedFields) {
+  const phone = (updatedFields.phone || '').trim();
+  const secondaryPhone = (updatedFields.secondaryPhone || '').trim();
+  assertSupplierPhoneUnique(phone, secondaryPhone, id);
+  if (secondaryPhone && secondaryPhone === phone) {
+    throw new Error('رقم الهاتف الثانوي لا يمكن أن يطابق الرقم الرئيسي');
+  }
+
+  const payload = {
+    ...updatedFields,
+    updatedAt: getCairoFormattedDate()
+  };
+  window.updateFirestoreDoc(window.STORAGE_KEYS.SUPPLIERS, id, payload);
+  return window.getSupplierById(id);
+};
